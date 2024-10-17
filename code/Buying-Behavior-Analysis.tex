@@ -1,0 +1,611 @@
+% Options for packages loaded elsewhere
+\PassOptionsToPackage{unicode}{hyperref}
+\PassOptionsToPackage{hyphens}{url}
+\PassOptionsToPackage{dvipsnames,svgnames,x11names}{xcolor}
+%
+\documentclass[
+]{article}
+\usepackage{amsmath,amssymb}
+\usepackage{iftex}
+\ifPDFTeX
+  \usepackage[T1]{fontenc}
+  \usepackage[utf8]{inputenc}
+  \usepackage{textcomp} % provide euro and other symbols
+\else % if luatex or xetex
+  \usepackage{unicode-math} % this also loads fontspec
+  \defaultfontfeatures{Scale=MatchLowercase}
+  \defaultfontfeatures[\rmfamily]{Ligatures=TeX,Scale=1}
+\fi
+\usepackage{lmodern}
+\ifPDFTeX\else
+  % xetex/luatex font selection
+\fi
+% Use upquote if available, for straight quotes in verbatim environments
+\IfFileExists{upquote.sty}{\usepackage{upquote}}{}
+\IfFileExists{microtype.sty}{% use microtype if available
+  \usepackage[]{microtype}
+  \UseMicrotypeSet[protrusion]{basicmath} % disable protrusion for tt fonts
+}{}
+\makeatletter
+\@ifundefined{KOMAClassName}{% if non-KOMA class
+  \IfFileExists{parskip.sty}{%
+    \usepackage{parskip}
+  }{% else
+    \setlength{\parindent}{0pt}
+    \setlength{\parskip}{6pt plus 2pt minus 1pt}}
+}{% if KOMA class
+  \KOMAoptions{parskip=half}}
+\makeatother
+\usepackage{xcolor}
+\usepackage[margin=1in]{geometry}
+\usepackage{color}
+\usepackage{fancyvrb}
+\newcommand{\VerbBar}{|}
+\newcommand{\VERB}{\Verb[commandchars=\\\{\}]}
+\DefineVerbatimEnvironment{Highlighting}{Verbatim}{commandchars=\\\{\}}
+% Add ',fontsize=\small' for more characters per line
+\usepackage{framed}
+\definecolor{shadecolor}{RGB}{248,248,248}
+\newenvironment{Shaded}{\begin{snugshade}}{\end{snugshade}}
+\newcommand{\AlertTok}[1]{\textcolor[rgb]{0.94,0.16,0.16}{#1}}
+\newcommand{\AnnotationTok}[1]{\textcolor[rgb]{0.56,0.35,0.01}{\textbf{\textit{#1}}}}
+\newcommand{\AttributeTok}[1]{\textcolor[rgb]{0.13,0.29,0.53}{#1}}
+\newcommand{\BaseNTok}[1]{\textcolor[rgb]{0.00,0.00,0.81}{#1}}
+\newcommand{\BuiltInTok}[1]{#1}
+\newcommand{\CharTok}[1]{\textcolor[rgb]{0.31,0.60,0.02}{#1}}
+\newcommand{\CommentTok}[1]{\textcolor[rgb]{0.56,0.35,0.01}{\textit{#1}}}
+\newcommand{\CommentVarTok}[1]{\textcolor[rgb]{0.56,0.35,0.01}{\textbf{\textit{#1}}}}
+\newcommand{\ConstantTok}[1]{\textcolor[rgb]{0.56,0.35,0.01}{#1}}
+\newcommand{\ControlFlowTok}[1]{\textcolor[rgb]{0.13,0.29,0.53}{\textbf{#1}}}
+\newcommand{\DataTypeTok}[1]{\textcolor[rgb]{0.13,0.29,0.53}{#1}}
+\newcommand{\DecValTok}[1]{\textcolor[rgb]{0.00,0.00,0.81}{#1}}
+\newcommand{\DocumentationTok}[1]{\textcolor[rgb]{0.56,0.35,0.01}{\textbf{\textit{#1}}}}
+\newcommand{\ErrorTok}[1]{\textcolor[rgb]{0.64,0.00,0.00}{\textbf{#1}}}
+\newcommand{\ExtensionTok}[1]{#1}
+\newcommand{\FloatTok}[1]{\textcolor[rgb]{0.00,0.00,0.81}{#1}}
+\newcommand{\FunctionTok}[1]{\textcolor[rgb]{0.13,0.29,0.53}{\textbf{#1}}}
+\newcommand{\ImportTok}[1]{#1}
+\newcommand{\InformationTok}[1]{\textcolor[rgb]{0.56,0.35,0.01}{\textbf{\textit{#1}}}}
+\newcommand{\KeywordTok}[1]{\textcolor[rgb]{0.13,0.29,0.53}{\textbf{#1}}}
+\newcommand{\NormalTok}[1]{#1}
+\newcommand{\OperatorTok}[1]{\textcolor[rgb]{0.81,0.36,0.00}{\textbf{#1}}}
+\newcommand{\OtherTok}[1]{\textcolor[rgb]{0.56,0.35,0.01}{#1}}
+\newcommand{\PreprocessorTok}[1]{\textcolor[rgb]{0.56,0.35,0.01}{\textit{#1}}}
+\newcommand{\RegionMarkerTok}[1]{#1}
+\newcommand{\SpecialCharTok}[1]{\textcolor[rgb]{0.81,0.36,0.00}{\textbf{#1}}}
+\newcommand{\SpecialStringTok}[1]{\textcolor[rgb]{0.31,0.60,0.02}{#1}}
+\newcommand{\StringTok}[1]{\textcolor[rgb]{0.31,0.60,0.02}{#1}}
+\newcommand{\VariableTok}[1]{\textcolor[rgb]{0.00,0.00,0.00}{#1}}
+\newcommand{\VerbatimStringTok}[1]{\textcolor[rgb]{0.31,0.60,0.02}{#1}}
+\newcommand{\WarningTok}[1]{\textcolor[rgb]{0.56,0.35,0.01}{\textbf{\textit{#1}}}}
+\usepackage{graphicx}
+\makeatletter
+\def\maxwidth{\ifdim\Gin@nat@width>\linewidth\linewidth\else\Gin@nat@width\fi}
+\def\maxheight{\ifdim\Gin@nat@height>\textheight\textheight\else\Gin@nat@height\fi}
+\makeatother
+% Scale images if necessary, so that they will not overflow the page
+% margins by default, and it is still possible to overwrite the defaults
+% using explicit options in \includegraphics[width, height, ...]{}
+\setkeys{Gin}{width=\maxwidth,height=\maxheight,keepaspectratio}
+% Set default figure placement to htbp
+\makeatletter
+\def\fps@figure{htbp}
+\makeatother
+\setlength{\emergencystretch}{3em} % prevent overfull lines
+\providecommand{\tightlist}{%
+  \setlength{\itemsep}{0pt}\setlength{\parskip}{0pt}}
+\setcounter{secnumdepth}{5}
+\ifLuaTeX
+  \usepackage{selnolig}  % disable illegal ligatures
+\fi
+\usepackage{bookmark}
+\IfFileExists{xurl.sty}{\usepackage{xurl}}{} % add URL line breaks if available
+\urlstyle{same}
+\hypersetup{
+  pdftitle={Analysis of Household Buying Behavior: Carbonated Soft Drinks and Other Beverages},
+  pdfauthor={Giovanni Compiani},
+  colorlinks=true,
+  linkcolor={Maroon},
+  filecolor={Maroon},
+  citecolor={Blue},
+  urlcolor={blue},
+  pdfcreator={LaTeX via pandoc}}
+
+\title{Analysis of Household Buying Behavior: Carbonated Soft Drinks and
+Other Beverages}
+\author{Giovanni Compiani}
+\date{}
+
+\begin{document}
+\maketitle
+
+{
+\hypersetup{linkcolor=}
+\setcounter{tocdepth}{2}
+\tableofcontents
+}
+\setlength{\parskip}{6pt}
+\newpage
+
+\section{Overview}\label{overview}
+
+We will perform an analysis of category buying and consumption behavior
+of beverages (not including alcohol or dairy), with a particular
+emphasis on sodas (carbonated soft drinks/CSD's). Sodas have been the
+subject of an intense debate linked to public health concerns, and one
+or two cent-per-ounce taxes have recently been passed in San Francisco,
+Cook County (although the tax was repealed in 2017), Philadelphia,
+Boulder, and other cities. Changes in buying behavior due to health
+concerns present challenges to the beverage manufacturers, but also
+opportunities if consumers are shifting their consumption to healthier
+substitutes.
+
+\section{Data}\label{data}
+
+The Nielsen Homescan panel data set is an ideal data source to study
+broad trends in consumption behavior. This data set is available for
+research and teaching purposes from the Kilts Center for Marketing at
+Chicago Booth.
+
+We will use Homescan panel data from 2004 to 2014. In many years we have
+information on the buying behavior of more than sixty thousand
+households. The corresponding full data set is large. Hence, to avoid
+memory and computing time issues, I extracted the beverage data that we
+will use for the analysis. I also took a \emph{25 percent random
+subsample} of all the original obervations. Once you load the data, you
+can verify that even this subsample of the beverage data contains more
+than 10 million observations (use \texttt{nrow}, \texttt{ncol}, or
+\texttt{dim} to see the size of a data.table or data frame).
+
+Although not necessary for this assignment, it is good to know how to
+create random subsamples. For more information, please consult the
+Appendix below.
+
+The key data for the analysis are contained in a \textbf{purchase file}
+and a \textbf{product file}. Load the data:
+
+\begin{Shaded}
+\begin{Highlighting}[]
+\FunctionTok{library}\NormalTok{(bit64)}
+\FunctionTok{library}\NormalTok{(data.table)}
+
+\NormalTok{data\_folder    }\OtherTok{=} \StringTok{"/Users/nichada/MyCode/MPCS/BUSN\_DataSci"}
+\NormalTok{proj\_folder }\OtherTok{=} \StringTok{"/DataSci\_Mkt/data"}
+\NormalTok{purchases\_file }\OtherTok{=} \StringTok{"purchases\_beverages.RData"}
+\NormalTok{products\_file  }\OtherTok{=} \StringTok{"products\_beverages.RData"}
+
+\FunctionTok{load}\NormalTok{(}\FunctionTok{paste0}\NormalTok{(data\_folder, }\StringTok{"/"}\NormalTok{, proj\_folder, }\StringTok{"/"}\NormalTok{, purchases\_file))}
+\FunctionTok{load}\NormalTok{(}\FunctionTok{paste0}\NormalTok{(data\_folder, }\StringTok{"/"}\NormalTok{, proj\_folder, }\StringTok{"/"}\NormalTok{, products\_file))}
+\end{Highlighting}
+\end{Shaded}
+
+Note that the string \texttt{data\_folder} contains the location of the
+data, i.e.~the data are \emph{assumed} to be in that folder! The
+\texttt{paste0} command merges strings. The bit64 package is used
+because the product UPC numbers are 64-bit (long) integers, a data type
+that is not part of base R.
+
+\newpage
+
+\section{Variable description}\label{variable-description}
+
+The \textbf{\texttt{purchases} data.table} contains information on the
+products bought by the households.
+
+\begin{itemize}
+\tightlist
+\item
+  \textbf{Inspect the data}
+\end{itemize}
+
+\begin{Shaded}
+\begin{Highlighting}[]
+\CommentTok{\# Inspect structure of the data}
+\FunctionTok{str}\NormalTok{(purchases)}
+
+\CommentTok{\# View first few rows of the data}
+\FunctionTok{head}\NormalTok{(purchases)}
+\end{Highlighting}
+\end{Shaded}
+
+Households are identified based on a unique \texttt{household\_code}.
+For each shopping trip we know the \texttt{purchase\_date} and the
+\texttt{retailer\_code} (for confidentiality, the Kilts Center data do
+not include the exact name of the retailer).
+
+For each product we have information on the \texttt{total\_price\_paid}
+and the \texttt{quantity} purchased. A deal flag (0/1) and a
+\texttt{coupon\_value} is also provided. The \texttt{total\_price\_paid}
+applies to \emph{all} units purchased. Hence, if
+\texttt{total\_price\_paid\ =\ 7.98} and \texttt{quantity\ =\ 2}, then
+the \emph{per-unit price} is 7.98/2 = 3.99 dollars. Furthermore, if the
+\texttt{coupon\_value} is positive, then the total dollar amount that
+the household spent is \texttt{total\_price\_paid\ -\ coupon\_value}.
+The \emph{per-unit cost} to the household is then even lower. For
+example, if \texttt{coupon\_value\ =\ 3} in the example above, then the
+per-unit cost to the household is (7.98 - 3)/2 = 2.49 dollars.
+
+I recommend to use the per-unit cost if the objective is to measure
+household dollar spending per unit purchased. If the objective is to
+measure the shelf-price of the product, use the per-unit price instead.
+
+\bigskip
+
+\textbf{Important data notes}
+
+\begin{enumerate}
+\def\labelenumi{\arabic{enumi}.}
+\item
+  Products in the Nielsen Homescan and RMS scanner data are identified
+  by a unique combination of \texttt{upc} and \texttt{upc\_ver\_uc}. Why
+  not just the UPC code? --- Because UPC's can change over time, for
+  example if a UPC is assigned to a different product. The UPC version
+  code captures such a change. From now on, whenever we refer to a
+  \emph{product}, we mean a \texttt{upc}/\texttt{upc\_ver\_uc}
+  combination. To identify a unique product in data.table, use a
+  \texttt{by\ =\ .(upc,\ upc\_ver\_uc)} statement.
+\item
+  The \texttt{panel\_year} variable in \texttt{purchases} is intended
+  \emph{only} to link households to the corresponding household
+  attribute data (income, age, etc.), which are updated yearly. At the
+  beginning of a \texttt{panel\_year} it need not exactly correspond to
+  the calendar year. We will work with the household attribute data in
+  one of the next assignments.
+\end{enumerate}
+
+The \textbf{\texttt{products}} data.table contains product information
+for each \texttt{upc}/\texttt{upc\_ver\_uc} combination.
+
+\begin{itemize}
+\tightlist
+\item
+  \textbf{Inspect the data.table}
+\end{itemize}
+
+\begin{Shaded}
+\begin{Highlighting}[]
+\CommentTok{\# Inspect structure of the data}
+\FunctionTok{str}\NormalTok{(products)}
+
+\CommentTok{\# View first few rows of the data}
+\FunctionTok{head}\NormalTok{(products)}
+\end{Highlighting}
+\end{Shaded}
+
+Note that products are organized into departments (e.g.~DRY GROCERY),
+product groups (e.g.~CARBONATED BEVERAGES), and product modules
+(e.g.~SOFT DRINKS - CARBONATED), with corresponding codes and
+descriptions. Use \texttt{unique} or \texttt{table} to print all values
+for the variables. Or create a table that lists all the product module
+codes, product module descriptions, and group descriptions in the data:
+
+\begin{Shaded}
+\begin{Highlighting}[]
+\NormalTok{module\_DT }\OtherTok{=}\NormalTok{ products[, }\FunctionTok{head}\NormalTok{(.SD, }\DecValTok{1}\NormalTok{), by }\OtherTok{=}\NormalTok{ product\_module\_code,}
+\NormalTok{                       .SDcols }\OtherTok{=} \FunctionTok{c}\NormalTok{(}\StringTok{"product\_module\_descr"}\NormalTok{, }\StringTok{"product\_group\_descr"}\NormalTok{)]}
+\NormalTok{module\_DT[}\FunctionTok{order}\NormalTok{(product\_group\_descr)]}
+\end{Highlighting}
+\end{Shaded}
+
+We also have brand codes and descriptions, such as PEPSI R (Pepsi
+regular). You will often seen the brand description CTL BR, which stands
+for \emph{control brand}, i.e.~private label brand. Brands are
+identified using either the \texttt{brand\_code\_uc} or
+\texttt{brand\_descr} variables, and are sold as different products
+(\texttt{upc}/\texttt{upc\_ver\_uc}) that differ along size, form
+(e.g.~bottles vs.~cans), or flavor.
+
+\texttt{multi} indicates the number of units in a multi-pack (a
+multi-pack is a pack size such that \texttt{multi\ \textgreater{}\ 1}).
+More on the amount and unit variables below.
+
+For many more details on the data, consult the \emph{Consumer Panel
+Dataset Manual} (on Canvas).
+
+\newpage
+
+\section{Prepare the data for the
+analysis}\label{prepare-the-data-for-the-analysis}
+
+We will calculate yearly summary statistics of customer buying behavior.
+To calculate the year corresponding to a purchase date, use
+\texttt{year()} in the data.table IDateTime class (see
+\texttt{?IDateTime} to learn about other conversion functions). Note
+that there are other methods for time aggregation that we will study
+later in the course.
+
+\begin{Shaded}
+\begin{Highlighting}[]
+\NormalTok{purchases[, year }\SpecialCharTok{:=} \FunctionTok{year}\NormalTok{(purchase\_date)]}
+\FunctionTok{head}\NormalTok{(purchases)}
+\end{Highlighting}
+\end{Shaded}
+
+Note that we create this year-variable because the \texttt{panel\_year}
+variable in \texttt{purchases} does not exactly correspond to the
+calendar year, as we already discussed above. You can verify that there
+is a tiny percentage of observations for the 2003 calender year, that
+``slipped'' into the data set because the purchases are recorded for
+households in the 2004 \texttt{panel\_year}.
+
+\begin{itemize}
+\tightlist
+\item
+  \textbf{Remove the 2003 observations}
+\end{itemize}
+
+\begin{Shaded}
+\begin{Highlighting}[]
+\CommentTok{\# Remove observations where the year is 2003}
+\NormalTok{purchases }\OtherTok{\textless{}{-}}\NormalTok{ purchases[year }\SpecialCharTok{!=} \DecValTok{2003}\NormalTok{]}
+
+\CommentTok{\# Check if the 2003 observations were successfully removed}
+\FunctionTok{summary}\NormalTok{(purchases}\SpecialCharTok{$}\NormalTok{year)}
+\end{Highlighting}
+\end{Shaded}
+
+\subsection{Define categories}\label{define-categories}
+
+In the analysis we want to distinguish between carbonated soft drinks
+(CSD's), diet (low-calorie) CSD's, bottled water, and a category
+including all other beverages (juices, \ldots). Hence, we create a new
+\texttt{category} variable that allows us classify the beverage purchase
+observations.
+
+\begin{itemize}
+\tightlist
+\item
+  \textbf{First, in the \texttt{products} table, create a default
+  \texttt{category} variable with a name such as ``Other''. Then find
+  the product module codes for the three relevant categories and assign
+  a corresponding name to \texttt{category}}.
+\item
+  \textbf{Document the number of observations, i.e.~the number of
+  products that belong to each of the categories}.
+\end{itemize}
+
+\begin{Shaded}
+\begin{Highlighting}[]
+\CommentTok{\# Assuming \textquotesingle{}products\textquotesingle{} is your data.table}
+
+\CommentTok{\# Step 1: Create a default category called \textquotesingle{}Other\textquotesingle{}}
+\NormalTok{products[, category }\SpecialCharTok{:=} \StringTok{"Other"}\NormalTok{]}
+
+\CommentTok{\# Step 2: Assign specific categories based on \textquotesingle{}product\_module\_descr\textquotesingle{}}
+\NormalTok{products[product\_module\_code }\SpecialCharTok{==} \StringTok{"1484"}\NormalTok{, category }\SpecialCharTok{:=} \StringTok{"Carbonated Soft Drinks"}\NormalTok{]}
+\NormalTok{products[product\_module\_code }\SpecialCharTok{==} \StringTok{"1553"}\NormalTok{, category }\SpecialCharTok{:=} \StringTok{"Diet Soft Drinks"}\NormalTok{]}
+\NormalTok{products[product\_module\_code }\SpecialCharTok{==} \StringTok{"1487"}\NormalTok{, category }\SpecialCharTok{:=} \StringTok{"Bottled Water"}\NormalTok{]}
+
+\CommentTok{\# Step 3: Check the distribution of categories}
+\CommentTok{\# table(products$category)}
+\NormalTok{products[, .N, by }\OtherTok{=}\NormalTok{ category]}
+\end{Highlighting}
+\end{Shaded}
+
+Now merge the category variable with the purchase data.
+
+\begin{Shaded}
+\begin{Highlighting}[]
+\NormalTok{purchases }\OtherTok{=} \FunctionTok{merge}\NormalTok{(purchases, products[, .(upc, upc\_ver\_uc, category)])}
+\end{Highlighting}
+\end{Shaded}
+
+To understand why this statement works, inspect the keys of the two
+tables (e.g.~\texttt{key(purchases)}). The keys contain two common
+columns, \texttt{upc} and \texttt{upc\_ver\_uc}, which are used as the
+foreign key that provides the product-level link between the products
+and purchase tables.
+
+\subsection{Volume in equivalent
+units}\label{volume-in-equivalent-units}
+
+To measure volume in \emph{equivalent units}, we need the product-level
+information on the \emph{units of measurement} of product volume
+(\texttt{size1\_units}), such as ounces, and the corresponding volume in
+a pack size (\texttt{size1\_amount1}). This information neeeds to be
+merged with the purchase data. We also merge with \texttt{multi}, which
+indicates multi-pack sizes.
+
+\begin{itemize}
+\tightlist
+\item
+  \textbf{Perform this merge}
+\end{itemize}
+
+For beverages, product volume is typically measured in ounces
+(\texttt{OZ}), less frequently in quarts (\texttt{QT}), and only rarely
+in counts (\texttt{CT}).
+
+\begin{itemize}
+\tightlist
+\item
+  \textbf{Document the number of observations by unit of measurement.
+  Let's ignore counts, and remove all corresponding data from the
+  purchases data.table. Then convert the \texttt{quantity} of units
+  purchased into a common \texttt{volume} measure in gallons, using the
+  \texttt{size1\_amount} variable. Also incorporate the \texttt{multi}
+  variable into the volume calculation---\texttt{multi} accounts for
+  multi-packs.}
+\end{itemize}
+
+\emph{Hint}: For example, for observations where \texttt{size1\_units}
+is \texttt{OZ}, you can calculate the volume:
+
+\begin{quote}
+\texttt{volume\ :=\ (1/128)*size1\_amount*multi*quantity}
+\end{quote}
+
+\subsection{Number of households in the
+data}\label{number-of-households-in-the-data}
+
+To calculate the number of households in the data by year, use:
+
+\begin{Shaded}
+\begin{Highlighting}[]
+\NormalTok{purchases[, no\_households }\SpecialCharTok{:=} \FunctionTok{length}\NormalTok{(}\FunctionTok{unique}\NormalTok{(household\_code)), by }\OtherTok{=}\NormalTok{ year]}
+\end{Highlighting}
+\end{Shaded}
+
+\begin{itemize}
+\tightlist
+\item
+  \textbf{Create and show a table with the number of households by year}
+\end{itemize}
+
+Note the expansion in the number of Homescan panelists in 2007!
+
+\newpage
+
+\section{Category-level analysis}\label{category-level-analysis}
+
+Now we are ready to analyse the evolution of purchases and consumption
+in the four product categories. We want to calculate total and per
+capita (more precisely: per household) consumption metrics. First, we
+create the total dollar spend and the total purchase volume for each
+category/year combination. We use the data.table approach for
+aggregation:
+
+\begin{Shaded}
+\begin{Highlighting}[]
+\NormalTok{purchases\_category }\OtherTok{=}\NormalTok{ purchases[,}
+\NormalTok{   .(}\AttributeTok{spend           =} \FunctionTok{sum}\NormalTok{(total\_price\_paid }\SpecialCharTok{{-}}\NormalTok{ coupon\_value),}
+     \AttributeTok{purchase\_volume =} \FunctionTok{sum}\NormalTok{(volume),}
+     \AttributeTok{no\_households   =} \FunctionTok{head}\NormalTok{(no\_households, }\DecValTok{1}\NormalTok{)),}
+\NormalTok{   keyby }\OtherTok{=}\NormalTok{ .(category, year)]}
+\end{Highlighting}
+\end{Shaded}
+
+\begin{itemize}
+\tightlist
+\item
+  \textbf{Calculate per capita spend and purchase volume (in gallons)
+  for each category separately. Then graph the evolution of the yearly
+  per capita purchase volume for all four categories}.
+\end{itemize}
+
+Note: Instead of creating graphs for each of the four categories you can
+use a \texttt{facet\_wrap} layer provided by ggplot2.
+
+\begin{itemize}
+\tightlist
+\item
+  \textbf{Express the purchase/consumption data as multiples of the 2004
+  values, such that per capita volume takes the value of 1.0 in all
+  categories in 2004. Such a normalization allows us to compare the
+  consumption series in each category directly in percentage terms. Then
+  show the graphs of consumption (normalized to its 2004 value), and
+  discuss the results}.
+\end{itemize}
+
+\newpage
+
+\section{Brand-level analysis}\label{brand-level-analysis}
+
+Now we investigate the evolution of consumption for some of the key
+brands in the soda and bottled water categories.
+
+\begin{itemize}
+\tightlist
+\item
+  \textbf{First, merge the brand identifier \texttt{brand\_descr} with
+  the purchase data}
+\end{itemize}
+
+Then we rank brands by total dollar spend in each category separately.
+We can assign ranks either using the \texttt{rank} function in base R,
+or using \texttt{frankv} (or \texttt{frank}) in the data.table package.
+Simple usage: To rank a vector \texttt{x} in ascending order, use
+\texttt{frankv(x)}. To rank in descending order, use
+\texttt{frankv(x,\ order\ =\ -1)}. See \texttt{?frank} for more options.
+
+First calculate total dollar spend by each category/brand combination,
+then assign the rank according to total spend:
+
+\begin{Shaded}
+\begin{Highlighting}[]
+\NormalTok{brand\_summary }\OtherTok{=}\NormalTok{ purchases[, .(}\AttributeTok{spend =} \FunctionTok{sum}\NormalTok{(total\_price\_paid }\SpecialCharTok{{-}}\NormalTok{ coupon\_value)),}
+\NormalTok{                            by }\OtherTok{=}\NormalTok{ .(category, brand\_descr)]}
+\NormalTok{brand\_summary[, rank }\SpecialCharTok{:=} \FunctionTok{frankv}\NormalTok{(spend, }\AttributeTok{order =} \SpecialCharTok{{-}}\DecValTok{1}\NormalTok{), by }\OtherTok{=}\NormalTok{ category]}
+\end{Highlighting}
+\end{Shaded}
+
+\begin{itemize}
+\tightlist
+\item
+  \textbf{Merge the brand ranks in the \texttt{brand\_summary} table
+  with the \texttt{purchases} information. Aggregate to the brand level,
+  as we did before at the category level. Then calculate per capita
+  spending and volume, and normalize the per capita variables to 1.0 in
+  2004, as before at the category level. Plot the evolution of brand
+  volume for the top four brands, separately for the CSD, diet CSD, and
+  bottled water categories.}
+\end{itemize}
+
+For bottled water you may add the \texttt{scales\ =\ "free\_y"} option
+in \texttt{facet\_wrap}:
+
+\begin{Shaded}
+\begin{Highlighting}[]
+   \FunctionTok{facet\_wrap}\NormalTok{(..., }\AttributeTok{scales =} \StringTok{"free\_y"}\NormalTok{)}
+\end{Highlighting}
+\end{Shaded}
+
+By default, the y-axes in a facet wrap are identical across all panels,
+but \texttt{free\_y} lets ggplot2 choose different axes for each panel.
+
+\section{Discussion}\label{discussion}
+
+\textbf{Provide a brief discussion of the marketing implications of your
+findings.}
+
+\newpage
+
+\section{Appendix: Using a random subsample of the
+data}\label{appendix-using-a-random-subsample-of-the-data}
+
+Although not necessary for the analysis in this assignment, especially
+as I already created a random subsample of the original data, it is
+useful to know how to create such a random subsample.
+
+For example, to draw a random sample of 2 million observations without
+replacement, use:
+
+\begin{Shaded}
+\begin{Highlighting}[]
+\NormalTok{purchases\_sub }\OtherTok{=}\NormalTok{ purchases[}\FunctionTok{sample}\NormalTok{(.N, }\DecValTok{2000000}\NormalTok{)]}
+\end{Highlighting}
+\end{Shaded}
+
+For details, consult \texttt{?sample}, and note that \texttt{.N} is the
+number of rows in a data.table---a variable that the data.table package
+automatically supplies.
+
+Alternatively, it may be even better to obtain \emph{all} purchase data
+for a random sample of households. First, we obtain a 25 percent sample
+of all household codes in the data:
+
+\begin{Shaded}
+\begin{Highlighting}[]
+\NormalTok{N\_households }\OtherTok{=} \FunctionTok{length}\NormalTok{(}\FunctionTok{unique}\NormalTok{(purchases}\SpecialCharTok{$}\NormalTok{household\_code))}
+\NormalTok{N\_subsample  }\OtherTok{=} \FunctionTok{round}\NormalTok{(}\FloatTok{0.25}\SpecialCharTok{*}\NormalTok{N\_households)}
+
+\NormalTok{household\_code\_sub }\OtherTok{=} \FunctionTok{sample}\NormalTok{(}\FunctionTok{unique}\NormalTok{(purchases}\SpecialCharTok{$}\NormalTok{household\_code), N\_subsample)}
+\end{Highlighting}
+\end{Shaded}
+
+Then extract all data for the chosen household keys. As we already
+discussed in the data.table \emph{Keys and Merging} overview, the first
+method is more readable yet somewhat slower, the second method is faster
+but also more confusing to the novice. The second method also does not
+keep its key, so you have to key the \texttt{purchases\_sub\_hh\_a}
+data.table later.
+
+\begin{Shaded}
+\begin{Highlighting}[]
+\NormalTok{purchases\_sub\_hh   }\OtherTok{=}\NormalTok{ purchases[household\_code }\SpecialCharTok{\%in\%}\NormalTok{ household\_code\_sub]}
+\NormalTok{purchases\_sub\_hh\_a }\OtherTok{=}\NormalTok{ purchases[.(household\_code\_sub)]}
+\end{Highlighting}
+\end{Shaded}
+
+
+\end{document}
