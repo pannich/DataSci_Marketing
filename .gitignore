@@ -4,3 +4,6 @@
 **/data/
 **/Data/
 /Compressed\ Datafiles\ All/
+
+*.RData
+/final_proj/models.zip

@@ -1,0 +1,490 @@
+---
+title: "Final Assignment: Incrementality and Optimal Personalized Targeting"
+author: "Nichada Wongrassamee"
+output:
+  pdf_document:
+    number_sections: yes
+    toc: yes
+urlcolor: blue
+graphics: yes
+editor_options: 
+  markdown: 
+    wrap: sentence
+---
+
+
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE, comment = NA, message = FALSE, 
+                      fig.width = 4.5, fig.height = 3.25, fig.align = "right")
+knitr::opts_chunk$set(tidy.opts = list(width.cutoff = 60), tidy = TRUE)
+knitr::opts_knit$set(root.dir = "/Users/nichada/MyCode/MPCS/_BUSN_DataSci/DataSci_Mkt/final_proj")
+setwd("/Users/nichada/MyCode/MPCS/_BUSN_DataSci/DataSci_Mkt/final_proj")
+data_folder = "Data"
+```
+
+\setlength{\parskip}{6pt}
+\newpage
+
+```{r}
+library(bit64)
+library(data.table)
+library(glmnet)
+library(ggplot2)
+library(knitr)
+library(corrplot)
+library(dplyr)
+```
+
+# Step 2: Model fit in 2017 validation sample
+
+Reload models and predict_DT here : - If you want to start from step 2, you can download the saved model in here.
+
+```{r, eval = TRUE}
+# Load CATE predictions
+predict_DT <- fread("CATE_predict_DT.csv")
+load("models.RData")
+load("large_cor_DT.RData")
+```
+
+## Descriptive analysis of predicted treatment effects
+
+Document the ATE (average treatment effect in the data).
+Summarize and graph the distribution of the predicted incremental effects, $\tau_i$, from the different estimation methods.
+How much variation is there in the CATEs compared to the ATE?
+
+```{r}
+ATE_OLS <- mean(predict_DT$CATE_OLS)
+ATE_LASSO <- mean(predict_DT$CATE_LASSO)
+ATE_EN <- mean(predict_DT$CATE_EN)
+
+# Print results
+cat("ATE (OLS):", ATE_OLS, "\n")
+cat("ATE (LASSO):", ATE_LASSO, "\n")
+cat("ATE (Elastic Net):", ATE_EN, "\n")
+```
+
+```{r}
+# MSE in each model
+mse_OLS = mean((predict_DT$CATE_OLS - ATE_OLS)^2) 
+mse_LASSO = mean((predict_DT$CATE_LASSO - ATE_LASSO)^2)
+mse_elnet = mean((predict_DT$CATE_EN - ATE_EN)^2)
+cat(mse_OLS, mse_LASSO, mse_elnet, "\n")
+```
+
+```{r}
+# Combine data for plotting
+CATE_melted <- melt(predict_DT[, .(CATE_OLS, CATE_LASSO, CATE_EN)], 
+                    variable.name = "Model", value.name = "CATE")
+
+# Plot the distribution of CATEs
+ggplot(CATE_melted, aes(x = CATE, fill = Model)) +
+  geom_density(alpha = 0.5) +
+  labs(title = "Distribution of Predicted Treatment Effects (CATE)", 
+       x = "CATE", y = "Density") +
+  theme_minimal()
+```
+
+```{r, eval=FALSE}
+# TODO : variance ?
+
+# Variance of CATE
+var_CATE_OLS <- var(predict_DT$CATE_OLS)
+var_CATE_LASSO <- var(predict_DT$CATE_LASSO)
+var_CATE_EN <- var(predict_DT$CATE_EN)
+
+# Print variance
+cat("Variance (OLS):", var_CATE_OLS, "\n")
+cat("Variance (LASSO):", var_CATE_LASSO, "\n")
+cat("Variance (Elastic Net):", var_CATE_EN, "\n")
+
+```
+
+Also compare and comment on the scale difference between the incremental effects and the level of sales.
+
+```{r}
+# Compare scale
+# TODO overall mean cate is the same as ate ?
+scale_comparison <- predict_DT[, .(
+  MEAN_CATE_OLS = mean(CATE_OLS), 
+  MIN_CATE_OLS = min(CATE_OLS), 
+  MAX_CATE_OLS = max(CATE_OLS),
+  MEAN_CATE_LASSO = mean(CATE_LASSO),
+  MIN_CATE_LASSO = min(CATE_LASSO),
+  MAX_CATE_LASSO = max(CATE_LASSO),
+  MEAN_CATE_EN = mean(CATE_EN),
+  MIN_CATE_EN = min(CATE_EN),
+  MAX_CATE_EN = max(CATE_EN),
+  Mean_Sales = mean(outcome_spend)
+)]
+
+print(scale_comparison)
+```
+
+The incremental effects is referring to the change in sales (+-) on consumer as a result of targeting.
+However the mean sales is the actual ave value of sale, regardless of targeting.
+The scale of the incremental effects (CATE/ATE) is much smaller than the overall sales value (Mean_Sales = 7.86), indicating that the treatment has a relatively modest effect on individual sales.
+The range of sales outcome is also wider ranging from 0 - 1462.84.
+While CATE_OLS ranges from -313.14383 to 467.15565, -101 to 126 for CATE lasso and -104 to 118 for CATE elasticnet.
+
+Having negative CATE_i means that the targeting has a negative impact on that particular customer_i.
+Having negative ATE means that the affects of targeting to everyone has ,on average, a reduce sales.
+
+Having positve CATE_i means that the targeting has a positive impact on that particular customer_i.
+Having positive ATE means that the affects of targeting to everyone has ,on average, a increase sales.
+
+Therefore, we should target only certain groups for optimal targeting result.
+
+## Model validation: Lifts
+
+Evaluate the model fit using lift charts and a lift table.
+The focus is on evaluating how well the models predict the CATE, $\tau_i$.
+Correspondingly, in a lift chart we create scores based on the estimated (predicted) CATE, and we calculate the average treatment effect in each score (group) based on the observed outcomes in the validation sample.
+
+I recommend using 20 scores.
+
+### Create lift table
+
+-   I group the score_group based on the predicted CATE score per each model.
+-   Calculate ATE in each subgroup, using the outcome_spending in the validation data.
+-   Plot ATE of each subgroup.
+
+```{r}
+lift_table <- function(model_name, outcome_spend, CATE, W, N_groups = 20) { 
+  DT = data.table(outcome_spend = outcome_spend,
+                  CATE = CATE,
+                  W = W)
+  DT[, score_group := as.integer(cut_number(CATE, n = N_groups))]
+  
+  lift_DT = DT[, .(
+    model = model_name,
+    CATE = mean(CATE),
+    ATE = mean(outcome_spend[W == 1], na.rm = TRUE) - 
+      mean(outcome_spend[W == 0], na.rm = TRUE),
+    std_error = sqrt(var(outcome_spend[W == 1], na.rm = TRUE)/sum(W == 1) + 
+                       var(outcome_spend[W == 0], na.rm = TRUE)/sum(W == 0)),
+    N = .N
+  ), keyby = score_group]
+  
+  lift_DT[, `:=`(lower = ATE + qt(0.025, df = N-1)*std_error, 
+                 upper = ATE + qt(0.975, df = N-1)*std_error)]
+  
+  lift_DT[, c("std_error", "N") := NULL]
+  lift_DT[, lift := 100 * ATE / mean(ATE, na.rm = TRUE)] # Lift based on ATE
+  
+  return(lift_DT)
+}
+```
+
+
+```{r}
+N_groups = 20
+
+lifts = list( 
+  lift_table("OLS", predict_DT$outcome_spend, predict_DT$CATE_OLS, predict_DT$W, N_groups),
+  lift_table("LASSO", predict_DT$outcome_spend, predict_DT$CATE_LASSO, predict_DT$W, N_groups),
+  lift_table("Elastic net",predict_DT$outcome_spend, predict_DT$CATE_EN, predict_DT$W, N_groups))
+  
+lifts = rbindlist(lifts)
+lifts[, model := factor(model, levels = c("OLS", "LASSO", "Elastic net"))]
+```
+
+Summary Lift
+
+```{r}
+lifts_print = dcast(lifts, score_group ~ model, value.var = "CATE")
+
+kable(lifts_print, digits = 2)
+```
+
+```{r}
+lifts_print = dcast(lifts, score_group ~ model, value.var = "ATE")
+
+kable(lifts_print, digits = 2)
+```
+
+```{r}
+ggplot(lifts, aes(x = score_group, y = ATE)) +
+  geom_line(color = "gray70") +
+  geom_errorbar(aes(ymin = lower, ymax = upper), color = "deepskyblue2",
+                size = 0.6, width = 0.1) +
+  geom_point(shape = 21, color = "gray30", fill = "hotpink", size = 2.5) +
+  scale_x_continuous("Score", limits = c(1, N_groups),
+                     breaks = seq(0, N_groups, 5), minor_breaks = 1:N_groups) + 
+  scale_y_continuous("Treatment effect", limits = c(-5, 20),
+                     breaks = seq(0, 60, 10)) + facet_wrap(~ model, ncol = 2) +
+  theme_bw()
+```
+
+# TODO Analysis :
+
+Since I group low CATE in group 1 and higher CATE in higher group numbers.
+The expected lift graph should reflect high treatment effect ATE in group 20.
+
+The current plot is showing unsmoothed result due to the model may be overfitting, having too many unnecessary features that confused the treatment effect.
+
+Future improvement, reduce overfitting my reduce the feature further.
+Only include necessary features to predict treatment effect.
+
+# Step 3: How well do the models predict in a different year?
+
+So far we have assessed the goodness of the model using data from the 2017 catalog mailing campaign.
+Since we also have data from the following year, we can leverage that to perform an *even more* out-of-sample validation exercise.
+If the model estimated on 2017 data predicts incremental spending well in 2018, that means the model has the ability to really help when applied to future decisions.
+
+Optionally, you can download `model.RData` here if you want to start from step 3.
+
+```{r}
+load(paste0(data_folder, "/Randomized-Implementation-Sample-2018.RData"))
+setnames(crm_DT, "mailing_indicator", "W")
+```
+
+**Warning**: The 2018 data table is also named `crm_DT`, just as the 2017 data.
+
+\bigskip
+
+The approach:
+
+1.  Use the model predictions based **only on the 2017 data**.
+2.  Predict the CATE for the customers in the October 2018 data.
+3.  Evaluate the model predictions via lift charts using the 2018 data.
+
+The structure of the 2018 data is identical to the structure of the 2017 data.
+In particular, the data contains a randomly selected sample of all customers in the data base, and the treatment assignment $W_i$ is randomized.
+
+\medskip
+
+Note: Ideally you would perform step 1 by re-estimating all models using *all* of the 2017 data (no training/validation sample split).
+However, to preserve time, it is perfectly fine if you keep the estimates from the training sample in step 1 to predict the 2018 treatment effects.
+
+```{r}
+# crm_DT is now 2018 data
+temp_DT = copy(crm_DT)
+# Remove the large_cor_DT$row from crm_DT
+temp_DT = temp_DT[, !c(large_cor_DT$row, "customer_id"), with = FALSE]
+```
+
+```{r}
+predict_DT_2018 = crm_DT[, .(customer_id, outcome_spend, W)]
+```
+
+```{r}
+# Predict using OLS
+temp_DT[, W := 1]  # Set W = 1 for all data rows
+Y_1_OLS = predict(fit_ols, newdata = temp_DT)
+
+temp_DT[, W := 0]  # Set W = 1 for all data rows
+Y_0_OLS = predict(fit_ols, newdata = temp_DT)
+              
+predict_DT_2018[, CATE_OLS := Y_1_OLS - Y_0_OLS]
+
+# Predict using LASSO
+
+# -> Assume target everyone
+temp_DT[, W := 1]  # Set W = 1 for all data rows
+Y_1_LASSO <- predict(
+  fit_LASSO,
+  newx = model.matrix(outcome_spend ~ W * .,
+                      data = temp_DT)[,-1], s = "lambda.min")
+
+# -> Assume target no one
+temp_DT[, W := 0]  # Set W = 0 for all data rows 
+Y_0_LASSO <- predict(
+  fit_LASSO, 
+  newx = model.matrix(outcome_spend ~ W * ., 
+                      data = temp_DT)[,-1], s = "lambda.min")
+predict_DT_2018[, CATE_LASSO := Y_1_LASSO - Y_0_LASSO]
+
+# Predict using Elastic Net
+temp_DT[, W := 1] 
+Y_1_EN <- predict(
+  fit_elnet, 
+  newx = model.matrix(outcome_spend ~ W * ., 
+                      data = temp_DT)[,-1], s = "lambda.min")
+
+temp_DT[, W := 0]  # Set W = 0 for prediction
+Y_0_EN <- predict(
+  fit_elnet, 
+  newx = model.matrix(outcome_spend ~ W * ., 
+                      data = temp_DT)[,-1], s = "lambda.min")
+predict_DT_2018[, CATE_EN := Y_1_EN - Y_0_EN]
+
+```
+
+### Lift 2018
+
+```{r}
+N_groups = 20
+
+lifts = list( 
+  lift_table("OLS", predict_DT_2018$outcome_spend, predict_DT_2018$CATE_OLS, 
+             predict_DT_2018$W, N_groups),
+  lift_table("LASSO", predict_DT_2018$outcome_spend, predict_DT_2018$CATE_LASSO, 
+             predict_DT_2018$W, N_groups),
+  lift_table("Elastic net",predict_DT_2018$outcome_spend, predict_DT_2018$CATE_EN, 
+             predict_DT_2018$W, N_groups))
+  
+lifts = rbindlist(lifts)
+lifts[, model := factor(model, levels = c("OLS", "LASSO", "Elastic net"))]
+```
+
+Summary Lift
+
+-   Predicted CATE :
+
+```{r}
+lifts_print = dcast(lifts, score_group ~ model, value.var = "CATE")
+
+kable(lifts_print, digits = 2)
+```
+
+-   2018 ATE :
+
+```{r}
+lifts_print = dcast(lifts, score_group ~ model, value.var = "ATE")
+
+kable(lifts_print, digits = 2)
+```
+
+```{r}
+ggplot(lifts, aes(x = score_group, y = ATE)) +
+  geom_line(color = "gray70") +
+  geom_errorbar(aes(ymin = lower, ymax = upper), color = "deepskyblue2",
+                size = 0.6, width = 0.1) +
+  geom_point(shape = 21, color = "gray30", fill = "hotpink", size = 2.5) +
+  scale_x_continuous("Score", limits = c(1, N_groups),
+                     breaks = seq(0, N_groups, 5), minor_breaks = 1:N_groups) + 
+  scale_y_continuous("Theatment Effect", limits = c(-5, 60),
+                     breaks = seq(0, 60, 10)) + facet_wrap(~ model, ncol = 2) +
+  theme_bw()
+```
+
+```{r}
+# Plot function for lift charts
+# Plot function for lift charts with facet_wrap
+plot_lift_chart <- function(lift_table) {
+  ggplot(lift_table, aes(x = score_group)) +
+    geom_line(aes(y = ATE), color = "blue", linetype = "dashed", size = 1) +
+    geom_line(aes(y = CATE), color = "red", size = 1) +
+    geom_text(
+      aes(x = max(score_group), y = max(ATE), label = "ATE"),
+      color = "blue", hjust = 1, vjust = 0.5, size = 2
+    ) +
+    geom_text(
+      aes(x = max(score_group), y = max(CATE), label = "CATE"),
+      color = "red", hjust = 1, vjust = 0.5, size = 2
+    ) +
+    labs(
+      title = "Lift Chart by Model",
+      x = "Predicted Spending Group",
+      y = "Treatment Effect"
+    ) +
+    facet_wrap(~ model, ncol = 2) +  # Add facet wrap by model
+    theme_minimal()
+}
+```
+
+```{r}
+plot_2_lifts <- plot_lift_chart(lifts)
+print(plot_2_lifts)
+```
+
+### Evaluate the model predictions via lift charts using the 2018 data.
+
+The model show lift as expected.
+
+# Step 4: Develop a Targeting Policy
+
+Based on the results in Steps 2 and 3, choose the best-performing model and use it to decide who should be targeted in the 2018 sample.
+For these calculations, assume that the cost of targeting a customer is \$0.99, that the profit margin is 32.5 percent and that you have a large (unlimited) marketing budget for this campaign.
+
+Target a customer if the incremental value from targeting exceeds the targeting cost (in expectation)
+
+$$ m \cdot \tau > c $$ Target if :
+
+$$ \tau > \frac{c}{m} $$
+
+Calculate threshold for targeting
+
+```{r}
+margin = 0.325 # 32.5 percent 
+cost = 0.99 # 99 cents
+threshold = cost / margin
+
+```
+
+I found that the LASSO and the elastic net fit about equally well.
+I will pick LASSO as the preferred model to perform cost analysis.
+
+```{r}
+# Assuming `predict_DT` contains customer-level CATE predictions
+predict_DT_2018[, target := ifelse(CATE_LASSO > threshold, 1, 0)]
+```
+
+Percentage of customer that we should target :
+
+```{r}
+# Summarize targeting results
+summary_results <- predict_DT_2018[target == 1, .(
+  total_customers_targeted = .N,
+  avg_CATE = mean(CATE_LASSO, na.rm = TRUE),
+  percent_targetted = .N / nrow(predict_DT_2018),
+  total_cost = .N * cost,
+  total_profit = sum(CATE_LASSO * margin, na.rm = TRUE)
+)]
+
+# Calculate net profit
+summary_results[, net_profit := total_profit - total_cost]
+
+# View summary
+print(summary_results)
+```
+
+In the targeting policy, I used Lasso model to preduct CATE in 2018.
+Then, I filtered the customers that we should target based on CATE_i exceeding the threshold (cost/ margin).
+With this, there are 31706 total customers targeted that will add to the profit if we target them.
+
+This accounts to 25% of total customers in 2018.
+We will be spedning 31,388 dollars on cost and gain 74610.47 total profit.
+
+\newpage
+
+# WriteUp
+
+Summary of Findings: Model Performance and Lift Chart Analysis
+
+I conducted a two-in-one regression analysis to compare the effects of targeting versus non-targeting at the individual customer level (CATE).
+After fitting the models, the OLS, LASSO, and Elastic Net retained 294, 75, and 86 features, respectively, after regularization.
+
+These three models were then used to predict CATE on the validation dataset.
+To evaluate their performance, I validated the predictions using a lift chart.
+The lift chart illustrates the targeting effect across score groups.
+The methodology involves predicting CATE with each model, segmenting customers into score groups based on their CATE values, and calculating the ATE for each group.
+ATE is computed as the mean outcome spending for targeted customers (W=1) minus the mean outcome spending for non-targeted customers (W=0) within each segment.
+The plotted ATE is expected to show increasing targeting effects as the score group values rise.
+
+The models evaluated (OLS, LASSO, Elastic Net) did not perform as expected, failing to demonstrate a consistent lift in treatment effects across score groups according to the lift graphs produced on the validation data set.
+Variations in lift patterns suggest issues such as potential overfitting or model instability.
+The lack of a clear lift trend diminishes the effectiveness of the targeting strategy.
+
+In this analysis, I used CATE (Conditional Average Treatment Effect) to provide customer-level insights into the incremental impact of targeting.
+This granularity enables refined targeting policies compared to using ATE (Average Treatment Effect) alone.
+However, the variance in CATE predictions across models highlights the need for improved feature selection and model tuning to enhance prediction stability and accuracy.
+
+To create a targeting Policy, I picked the most optimal model to predict CATE in 2018.
+Since the three models that I produced did not demonstrate lift as the score group increase, I chose LASSO model for the purpose of the analysis.
+In cost-benefit analysis, I identified a threshold to target customers where incremental profit exceeds the targeting cost.
+As a result, I can target 25.4% of the customer base (31,706 customers) yielded an estimated net profit of \$43,221, highlighting the potential financial benefit of personalized targeting despite model limitations.
+
+During the analysis, I encounter challenges including model overfitting, variability of results and limited lift outcome.
+Model Overfitting, The models may include extraneous features, leading to overfitting and reduced generalizability to new data.
+Variability in Results: Differences in treatment effect predictions across models make it challenging to select the most reliable model.
+The limited lift outcome limits the strategic advantage of personalized targeting.
+
+There are some potential improvement that I want to include :
+
+1.  Model Refinement: Simplify feature sets to focus on the most impactful predictors of treatment effect, reducing noise and overfitting. Eventhough lasso and elasticnet already have regularization technique to reduce the model features. However, there is still need for further feature selection. Consider ensemble methods to improve prediction robustness.
+2.  Incorporate Business Context: Collaborate with domain experts to incorporate contextual insights, improving model interpretability and alignment with business goals.
+
+While the models did not yield the desired lift, the use of CATE remains a valuable approach for identifying profitable customer segments.
+By addressing overfitting and variability challenges, the targeting policy can be significantly enhanced to maximize financial outcomes and campaign efficiency.

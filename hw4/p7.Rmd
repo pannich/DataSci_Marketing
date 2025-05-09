@@ -1,0 +1,882 @@
+---
+title: "Churn Management"
+author: "Giovanni Compiani"
+output:
+  pdf_document:
+    number_sections: yes
+    toc: yes
+    latex_engine: xelatex
+    keep_tex: true
+  word_document:
+    toc: yes
+header-includes:
+  - \usepackage{fontspec}
+  - \setmainfont{Times New Roman}
+  - \usepackage{longtable}
+  - \usepackage{pdflscape}
+urlcolor: blue
+graphics: yes
+editor_options: 
+  markdown: 
+    wrap: 72
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE, comment = NA, message = FALSE, 
+                      fig.width = 4.5, fig.height = 3.25, fig.align = "right")
+knitr::opts_chunk$set(tidy.opts = list(width.cutoff = 60), tidy = TRUE)
+```
+
+\setlength{\parskip}{6pt}
+\newpage
+
+```{r}
+library(bit64)
+library(data.table)
+library(ggplot2)
+library(broom)
+library(knitr)
+library(dplyr)
+library(kableExtra)
+
+```
+
+# Overview
+
+Cell2Cell, a wireless telecommunications company (with its name altered
+for confidentiality), is working to reduce customer churn. The objective
+of this project is to create a model that predicts customer churn at
+Cell2Cell and to leverage insights from the model to design a targeted
+incentive strategy aimed at decreasing churn rates.
+
+In the assignment, you will address these key issues:
+
+1.  Is customer churn at Cell2Cell predictable from the customer
+    information that Cell2Cell maintains?
+
+2.  What factors drive customer churn? Which factors are particularly
+    important?
+
+3.  What incentives should Cell2Cell offer to prevent customer churn?
+
+4.  What is the economic value of a proposed targeted plan to prevent
+    churn, and how does this value differ across customer segments?
+    Compare the economic value to an incentive with a cost of \$100 and
+    another incentive with a cost of \$175. Which customers segments
+    should receive the incentive? Does the answer depend on the success
+    probability?
+
+Note that, in what follows, the key steps you need to take are
+highlighted in *italic*.
+
+\newpage
+
+# Data
+
+All data are contained in the file `Cell2Cell.RData`, which is posted on
+Canvas.
+
+```{r}
+data_folder    = "./Data"
+Cell2Cell = "Cell2Cell.RData"
+load(paste0(data_folder, "/", Cell2Cell))
+```
+
+\medskip
+
+Please consult the file `Cell2Cell-Database-Documentation.xlsx` for a
+description of the data and some summary statistics. Note that
+*calibration sample* is an alternative term for *training* or
+*estimation* sample.
+
+*Report the churn rate in the calibration sample and in the validation
+sample and compare the two.*
+
+```{r}
+# str(cell2cell_DT)
+
+calibration_sample <- subset(cell2cell_DT, calibrat == 1)
+validation_sample <- subset(cell2cell_DT, calibrat == 0)
+
+# Calculate churn rate in the calibration sample
+calibration_churn_rate <- mean(calibration_sample$churn)
+cat("Churn Rate in Calibration Sample:", calibration_churn_rate, "\n")
+
+# Calculate churn rate in the validation sample
+validation_churn_rate <- mean(validation_sample$churn)
+cat("Churn Rate in Validation Sample:", validation_churn_rate, "\n")
+
+# Compare churn rates
+if (calibration_churn_rate > validation_churn_rate) {
+  cat("The churn rate is higher in the calibration sample.\n")
+} else if (calibration_churn_rate < validation_churn_rate) {
+  cat("The churn rate is higher in the validation sample.\n")
+} else {
+  cat("The churn rates are the same in both samples.\n")
+}
+```
+
+You can see that the calibration sample was selected using
+*oversampling*. The purpose of oversampling was to obtain more precise
+estimates (lower standard errors) when estimating a logistic regression
+model. The validation sample, on the other hand, was not created using
+oversampling and represents the *true churn rate* in the data.
+
+As you can see, some variables have missing values, which---as you know
+by now---is common and of no concern (unless the missing values indicate
+some *systematic* flaws or bias in how the data were constructed). Most
+estimation methods in R will automatically delete rows with missing
+values before estimating the model. However, the `predict` methods will
+yield `NA` values if a row in the data used for prediction contains
+missing values. Hence, in a situation where you don't need to keep the
+full data I recommend to remove any observations with missing values
+before you conduct the main analysis.
+
+*Perform this data-cleaning step.*
+
+```{r}
+# Remove rows with missing values from the data
+cell2cell_clean <- na.omit(cell2cell_DT)
+
+# Verify that missing values have been removed
+print(sprintf("Original dataset had %d rows", nrow(cell2cell_DT)))
+print(sprintf("Cleaned dataset has %d rows", nrow(cell2cell_clean)))
+print(sprintf("Removed %d rows with missing values", nrow(cell2cell_DT) - nrow(cell2cell_clean)))
+
+```
+
+\newpage
+
+# Model estimation
+
+*Estimate a logit model to predict the conditional churn probability.*
+
+```{r}
+# Fit the logistic regression model
+fit <- glm(churn ~ ., 
+             data = cell2cell_clean[, .SD, .SDcols = !c("customer", "calibrat")], 
+             family = binomial())
+```
+
+You can inspect the regression output using methods you already used,
+such as `summary`. Having said this, especially when you have a large
+number of inputs, it can be convenient to store the regression estimates
+in a table. A simple way to do this is to install the [broom
+package](https://cran.r-project.org/web/packages/broom/vignettes/broom.html)
+that has the purpose of cleaning up messy R output.
+
+Using the `tidy` function in the `broom` package it is trivial to
+capture the regression output in the form of a data.table:
+
+```{r}
+# Tidy the model output and convert to data.table
+results_DT <- as.data.table(tidy(fit))
+
+# Display the regression results with 5 decimal places
+kable(results_DT, digits = 5)
+
+```
+
+For `kable` to work, you need to load the `knitr` library.
+
+\newpage
+
+# Prediction: Accounting for oversampling
+
+The idea of oversampling is as follows. If the response rate in the data
+is small, there is a strong imbalance between observations with a
+response of $Y=1$ and a response of $Y=0$. As a consequence, estimating
+the model is difficult and the estimates will be imprecise, i.e. they
+will have large standard errors.
+
+The solution: Create a training sample with one half of observations
+randomly chosen from the original data with response $Y=1$, and the
+other half randomly chosen from the original data with response $Y=0$.
+Now estimation is easier and the standard errors will be smaller.
+
+However, when applied to logistic regression, oversampling will result
+in an inconsistent estimate of the intercept (constant) term, although
+all other estimates will be consistent. Hence, if we do not de-bias
+(adjust) the intercept, the predicted probabilities will be too large,
+reflecting the artificial response rate of $\frac{1}{2}$ in the
+over-sampled training data.
+
+In order to de-bias the scale of the predicted response (in this
+example: churn) in the validation sample we need to supply an *offset
+variable* to the logistic regression model. An offset is a known number
+that is added to the right-hand side of the regression when estimating
+the model, and adding the offset will correspondingly change the
+estimate of the intercept. The offset takes the form:
+$$\text{offset}=\left[\log(\bar{p}_{t})-\log(1-\bar{p}_{t})\right]-\left[\log(\bar{p}_{v})-\log(1-\bar{p}_{v})\right]$$
+
+Here, $\bar{p}_{t}$ is the average response rate in the training sample
+and $\bar{p}_{v}$ is the average response rate in the validation sample.
+Note that the offset is positive (given that $\bar{p}_t > \bar{p}_v$),
+so that including the offset term when estimating the model accounts for
+the fact that the training sample has a higher share of $Y=1$ relative
+to the validation sample.
+
+Conversely, when we predict the response rate in the validation sample,
+we set the offset variable to 0.
+
+Why does this work? --- Conceptually, logistic regression is a
+regression model for the log-odds of the response (outcome) probability,
+$$\log \left(\frac{p}{1-p}\right) = \log(p) - \log(1-p) = \beta_0 + \beta_1 X_1 + \beta_2 X_1 + \dots $$
+
+When we add the offset variable to the right hand side of the regression
+model the estimation algorithm will "incorporate" the offset in the
+intercept, $\beta_0$. The effect of setting the offset to 0 (when
+applying the model to the validation sample) is equivalent to
+subtracting the offset from the intercept. Subtracting the offset
+amounts to:
+
+(i) Subtracting $\log(\bar{p}_{t})-\log(1-\bar{p}_{t})$, the log-odds of
+    the artificial response rate in the training sample, and
+
+(ii) Adding $\log(\bar{p}_{v})-\log(1-\bar{p}_{v})$, the log-odds in the
+     validation sample that reflects the true log-odds in the data.
+
+This process de-biases the predicted response, i.e. restores the correct
+response level in the validation sample.
+
+Note: Never use over-sampling to create the validation sample, otherwise
+the offset variable approach will not work.
+
+\bigskip
+
+*Create an `offset_var` variable and add it to the data set. Then
+re-estimate the logistic regression. To tell `glm` that you want to use
+`offset_var`, you need to use a formula of the form:*
+
+```{r, eval=FALSE}
+y ~ offset(offset_var) + <all other variables>
+```
+
+```{r}
+# Oversampling Bias: Helps in training but inflates the response rate, requiring adjustment.
+# Offset Variable: Corrects the intercept to align predictions with the true response rate.
+# Validation Data: Always use non-oversampled data for evaluation and prediction.
+
+# Separate calibration and validation samples
+calibration_sample <- subset(cell2cell_clean, calibrat == 1)
+validation_sample <- subset(cell2cell_clean, calibrat == 0)
+
+# Calculate the average churn rates in each sample
+pt <- mean(calibration_sample$churn)
+pv <- mean(validation_sample$churn)
+
+# Calculate the offset variable
+offset_var <- (log(pt) - log(1 - pt)) - (log(pv) - log(1 - pv))
+
+# Add the offset variable to the calibration sample
+calibration_sample$offset_var <- offset_var
+
+```
+
+```{r}
+# Fit the logistic regression model with the offset
+fit_with_offset <- glm(churn ~ . + offset(offset_var), 
+                       data = calibration_sample[, .SD, .SDcols = !c("customer", "calibrat")],
+                       family = binomial)
+
+# View the summary of the model
+summary(fit_with_offset)
+
+```
+
+*Where* you place `offset()` on the right-hand side of the formula is
+irrelevant.
+
+\medskip
+
+*Before predicting the response rate in the validation sample set the
+offset to 0. Then, when you invoke the `predict` function, supply the
+data with the offset set to 0 using the `newdata` option.*
+
+```{r}
+# Add offset_var as 0 in the validation sample
+validation_sample$offset_var <- 0
+
+# Predict churn probabilities in the validation sample with offset set to 0
+validation_sample$predicted_churn <- predict(
+  fit_with_offset,
+  newdata = validation_sample[, .SD, .SDcols = !c("customer","calibrat")],
+  type = "response")
+```
+
+*Compare the average predicted response with the average observed
+response rate in the validation sample.*
+
+```{r}
+# Calculate the average predicted churn rate
+average_predicted_churn <- mean(validation_sample$predicted_churn)
+
+# Calculate the observed churn rate in the validation sample
+average_observed_churn <- mean(validation_sample$churn)
+
+# Display the results
+cat("Average Predicted Churn Rate in Validation Sample:", average_predicted_churn, "\n")
+cat("Average Observed Churn Rate in Validation Sample:", average_observed_churn, "\n")
+cat("Average of predicted churn rate and the actual churn rate are close after \
+    de-biasing with the offset varaible. This indicates that the model's \
+    predictions are correctly calibrated to reflect the real-world churn rate. \n")
+```
+
+\newpage
+
+# Predictive power: Lift
+
+We evaluate the predictive fit of the logistic regression model using a
+lift table and lift chart. To develop reusable code, we develop a
+function that returns a lift table. The function (call it `liftTable`)
+will need to take the following inputs:
+
+-   Predicted outcome or score
+-   Observed outcome
+-   Number of segments to be created based on the score
+
+`liftTable` will return a data.table that contains:
+
+-   An index (`score_group`) for each segment that was created based on
+    the score
+-   The average score value (predicted outcome) in the `score_group`
+-   The average observed outcome in the `score_group`
+-   The lift factor
+
+\bigskip
+
+To code the `liftTable` command, I recommend to use the `cut_number`
+function in the ggplot2 package. `cut_number` takes a variable `x` and
+creates `n` groups with an approximately equal number of observations in
+each group. Observations are assigned to the groups based on their
+ranking along the variable `x`. The format is:
+
+```         
+cut_number(x, n = <no. of groups>)
+```
+
+\medskip
+
+To illustrate, we draw 10,000 random numbers from a uniform distribution
+on $[0,5]$. `cut_number` assigns each number to one of five (because we
+set `n = 5`) groups.
+
+```{r}
+set.seed(123)
+DT = data.table(x = runif(10000, min = 0, max = 5))
+DT[, group    := cut_number(x, n = 5)]
+DT[, group_no := as.integer(group)]
+```
+
+```{r}
+head(DT)
+table(DT$group)
+```
+
+\medskip
+
+As expected, because `x` is uniformly distributed on $[0,5]$, the five
+groups created by `cut_number` correspond almost exactly to a $[k,k+1]$
+interval ($k=0,1,\dots,4$), and each of these intervals contains exactly
+20 percent of all observations based on the rank of the `x` values. The
+`group` variable that we created is a factor that we converted to an
+integer score.
+
+\bigskip
+
+*Calculate a lift table for 20 segments. Inspect the lift table. Then
+provide two charts. First, plot the `score_group` segments on the x-axis
+versus the observed churn rate on the y-axis. Second, plot the segments
+versus the lift factor, and add a horizontal line at* $y=100$. How to do
+this in ggplot2 is explained in the ggplot2 guide (look for the
+`yintercept` option).
+
+```{r}
+liftTable <- function(predicted, observed, segments = 20) {
+  # Combine inputs into a data.table
+  DT <- data.table(predicted = predicted, observed = observed)
+  
+  # Create score groups using cut_number
+  DT[, score_group := as.integer(cut_number(predicted, n = segments))]
+  
+  # Calculate lift table metrics
+  lift_table <- DT[, .(
+    avg_score = mean(predicted),
+    avg_observed = mean(observed),
+    lift_factor = mean(observed) / mean(DT$observed) * 100
+  ), by = score_group]
+  
+  return(lift_table)
+}
+
+# Apply the liftTable function
+lift_table <- liftTable(
+  predicted = validation_sample$predicted_churn,
+  observed = validation_sample$churn,
+  segments = 20
+)
+
+# Inspect the lift table
+print(lift_table)
+
+#  Churn Rate vs. Score Groups
+# Higher score groups (with higher predicted churn probabilities) should have higher
+# observed churn rates.
+ggplot(lift_table, aes(x = score_group, y = avg_observed)) +
+  geom_line(color = "steelblue", linewidth = 1) +  # Use `linewidth` for line width
+  geom_point(color = "steelblue", size = 2) +  # Points on the line
+  labs(
+    title = "Observed Churn Rate by Score Group",
+    x = "Score Group",
+    y = "Observed Churn Rate"
+  ) +
+  theme_minimal()
+
+# Lift Factor vs. Score Groups
+# The lift factor should be highest for the top score groups (high-risk churners).
+# The horizontal line at y = 100 represents the baseline (random guessing or avg churn rate). 
+# It hits close to the mid segment group reflects that the churn predictions align 
+# with the reality (observation) of churn that is expected per each segment.
+ggplot(lift_table, aes(x = score_group, y = lift_factor)) +
+  geom_line(color = "darkorange", linewidth = 1) +  # Use `linewidth` for line width
+  geom_point(color = "darkorange", size = 2) +  # Points on the line
+  geom_hline(yintercept = 100, color = "red", linetype = "dashed") +  # Horizontal reference line
+  labs(
+    title = "Lift Factor by Score Group",
+    x = "Score Group",
+    y = "Lift Factor"
+  ) +
+  theme_minimal()
+
+```
+
+\newpage
+
+# Why do customers churn? --- Effect sizes
+
+We would like to understand *why* customers churn, which can help us to
+propose incentives to prevent customer churn
+
+*To this end, construct a table that contains comparable effect sizes
+(changes in the churn probability) for all independent variables, as we
+discussed in class.*
+
+Here are a few more details on the steps needed to create this table:
+
+1.  Because logistic regression coefficients are not directly
+    interpretable, we estimate a linear probability model of customer
+    churn. In a linear probability model we regress the $Y=0,1$ output
+    on all the customer features. The estimated coefficients can be
+    interpreted as differences in $\Pr\{Y=1 | X_1, X_2, \dots\}$ for a
+    one-unit difference in one of the features, $X_k$. Note: **The
+    *offset variable* should not be included in the linear probability
+    model as it is specific to logistic regression.**
+2.  Note that our analysis is based on a *comparison* of the effect
+    sizes of the different variables. However, because the variables
+    have different scales, the effect sizes are not directly comparable.
+    For example, `revenue` (mean monthly revenue) and `mou` (mean
+    monthly minutes use) have different means and standard deviations,
+    and hence the effects of increasing `revenue` and `mou` by one unit
+    on the churn probabilities are not comparable without taking the
+    scale differences into account.
+3.  To solve this problem we **standardize** the independent variables
+    in the data. To standardize, we divide the values of each
+    independent variable by its standard deviation, except if the
+    variable is a 0/1 dummy. Once standardized, all variables except the
+    dummies will have a standard deviation of 1, and a one unit
+    difference corresponds to a one standard deviation difference in the
+    original, non-standardized variable. Here's a function,
+    `standardize_columns`, that takes a column `x` as input and returns
+    the standardized values of the column:
+
+```{r}
+standardize_columns <- function(x) {
+   
+   # Check if the column is a dummy variable
+   elements = unique(x)
+   if (length(elements) == 2L & all(elements %in% c(0L,1L))) {
+      is_dummy = TRUE
+   } else {
+      is_dummy = FALSE
+   }
+   
+   # If not a dummy, divide values in x by its standard deviation
+   if (is_dummy == FALSE) x = x/sd(x, na.rm = TRUE)
+   
+   return(x)
+}
+```
+
+The first part of the function checks that the input `x` has exactly two
+elements and that these elements are the integers 0 and 1. Note that in
+R, numbers are represented as floating point numbers by default.
+However, adding `L` after the numbers tells R to represent the number as
+an integer.
+
+```{r}
+class(1)
+class(1L)
+```
+
+```{r}
+DT_lin_prob = cell2cell_clean[calibrat == 1]
+
+# Create a vector that contains the names of all inputs (covariates)
+# remove customer, calibrat, churn columns, retcall
+all_columns   = names(DT_lin_prob)
+input_columns = all_columns[-c(1:3, length(all_columns))] 
+
+# Standardize all input columns
+DT_lin_prob[, (input_columns) := lapply(.SD, standardize_columns), .SDcols = input_columns]
+
+library(tidyverse)
+
+Dv_lin_prob = cell2cell_clean[calibrat == 0]
+
+# Create a vector that contains the names of all inputs (covariates)
+all_columns   = names(Dv_lin_prob)
+input_columns = all_columns[-c(1:3, length(all_columns))]
+
+# Standardize all input columns
+Dv_lin_prob[, (input_columns) := lapply(.SD, standardize_columns), .SDcols = input_columns]
+
+# Calculate average churn probabilities in training and validation samples
+avg_churn_train <- mean(DT_lin_prob$churn)
+avg_churn_valid <- mean(Dv_lin_prob$churn)
+
+# Specify the formula excluding the first three columns
+independent_vars = names(DT_lin_prob)[-(1:3)]
+formula <- as.formula(paste("churn ~", paste(independent_vars, collapse = " + ")))
+
+# Fit the lpm model
+lm_model <- lm(formula, data = cell2cell_clean, family = "binomial")
+
+# Tidy the linear probability model output
+tidy_model <- tidy(lm_model)
+
+# Add effect_size column
+tidy_model <- tidy_model %>%
+  mutate(effect_size = estimate * (100 * avg_churn_valid / avg_churn_train))
+
+# Sort by absolute effect_size and print the table
+tidy_model <- tidy_model %>% arrange(desc(abs(effect_size)))
+kable(tidy_model)
+```
+
+4.  In order to create a table that captures the linear probability
+    model estimates, use the `tidy` function. Add a column, e.g.
+    `effect_size`, that scales the estimates by the factor
+    $$100 \cdot \frac{\bar{p}_{v}}{\bar{p}_{t}}$$ This scales the effect
+    sizes to the correct magnitude of the churn probabilities in the
+    validation sample and puts the effects on a 0-100% scale. Sort the
+    variables according to the magnitude of the effect sizes, and print
+    the results table using `kable`.
+5.  Inspect the results. Identify some factors that are strongly
+    associated with churn. If actionable, propose an incentive that can
+    be targeted to the customers to prevent churn.
+
+```{r}
+sorted_model <- tidy_model %>% arrange(desc(effect_size))
+top_5 <- head(sorted_model, 5)
+bottom_5 <- tail(sorted_model, 5)
+
+print(top_5)
+print(bottom_5)
+
+```
+
+Factors that are strongly associated with churn.
+
+**Strong positively churn**
+
+Assuming p\<0.05 is statistically significant
+
+1.  retcall (0.55341249) : Customers with retention calls are more
+    likely to churn, possibly due to dissatisfaction with previous
+    interactions or unresolved issues. Highly significant (p=1.89e-05)
+
+    Incentive :
+
+    -   Personalized Service Recovery: Provide dedicated, high-quality
+        customer service follow-ups for customers who have made a
+        retention call, ensuring their issues are fully resolved. -
+        Offer discounts or credits (e.g., one-time \$50 credit) for the
+        inconvenience.
+
+2.  refurb (0.19258463) : Customers with refurbished devices are more
+    likely to churn, possibly due to dissatisfaction with older
+    hardware. Highly significant(p=3.87e10-21)
+
+    Incentive :
+
+    -   Upgrade Program : Create trade-in programs allowing refurbished
+        users to easily swap for newer models at minimal cost.
+
+Note : retcalls frequency (0.16922533) and occhmkr (0.09912475) has high
+magnitude but not statistically significant p \> 0.05.
+
+**Strong negatively churn (unlikely to churn)**
+
+1.  creditaa (-0.2891994) : Customers with excellent credit ratings 'aa'
+    are less likely to churn, possibly indicating higher satisfaction or
+    loyalty.
+
+    Incentive :
+
+    -   Offer loyalty programs, such as discounts on premium services or
+        free upgrades, for customers who meet certain payment and credit
+        score thresholds.
+
+2.  retaccpt (-0.1760470) : Customers who accept retention offers are
+    less likely to churn, highlighting the effectiveness of these
+    interventions.
+
+    Incentive :
+
+    -   Post retention engagement : Provide incentives for continued
+        loyalty, such as bonus points or exclusive access to new
+        features.
+
+<!-- -->
+
+3.  credita (-0.1450354) : Customers with excellent credit ratings 'a'
+    are less likely to churn. Similar to creditaa.
+
+    Incentive :
+
+    -   Send message to encourage them to earn more points to move to
+        the 'aa' tier.
+
+\newpage
+
+# Economics of churn management
+
+Next, we would like to predict the value of a proposed churn management
+program in order to assess the maximum amount that we would spend to
+prevent a customer from churning for one year.
+
+*Perform this prediction*, under the following assumptions:
+
+1.  We consider a planning horizon of 4 years (the current year and
+    three additional years), and an annual discount rate of 8 percent.
+2.  Predict the churn management value for 20 groups, but keep in mind
+    that it is good practice to make sure the code works for an
+    arbitrary number of groups in case we wish to modify that in the
+    future. Predict the program value for these 20 customer segments
+    based on the predicted churn rate. Note that we create these
+    segments based on the validation sample data. We predict current and
+    future customer profits at the year-level. Hence, we also need to
+    convert both the monthly churn rate and the revenue data to the
+    year-level.
+3.  Assume that the churn management program has a success probability
+    `gamma` ($\gamma$) and compare the results for $\gamma=0.25$ and
+    $\gamma=0.5$.
+
+\medskip
+
+Hint: It is easy to make little mistakes in the lifetime value
+predictions. Hence, be very clear about what your code is supposed to
+achieve, and check that every step is correct.
+
+```{r}
+# Program Value 
+# Gamma = 0.25 : Success probability 25%. Churn with Incentive is 75%.
+# Gamma = 0.50 : Success probability 50%. Churn with Incentive is 50%.
+
+# Parameters
+discount_rate <- 0.08
+gamma_values <- c(0.25, 0.5)
+groups <- 20
+horizon <- 4  # 4 years
+
+# Convert monthly churn rate and revenue to yearly
+validation_data <- validation_sample 
+validation_data[, churn_rate_yearly := 1 - (1 - predicted_churn)^12]
+validation_data[, revenue_yearly := revenue * 12]
+
+# Group data into segments 
+# The segment is in the score_group column
+validation_data[, score_group := as.integer(cut_number(predicted_churn, n = groups))]
+
+# Function to calculate LTV
+calculate_ltv <- function(revenue, churn_rate, discount_rate, horizon) {
+  ltv <- 0
+  for (t in 0:(horizon - 1)) {
+    ltv <- ltv + (revenue * (1 - churn_rate)^t) / ((1 + discount_rate)^t)
+  }
+  return(ltv)
+}
+
+```
+
+```{r}
+# Calculate metrics for each group
+group_summary <- validation_data[, .(
+  avg_churn_rate = mean(churn_rate_yearly),
+  avg_revenue = mean(revenue_yearly),
+  avg_ltv = calculate_ltv(mean(revenue_yearly), mean(churn_rate_yearly), 
+                          discount_rate, horizon)
+  ), by = score_group]
+
+# Churn Rate with incentive
+group_summary[, churn_0.25 := (1-0.25) * avg_churn_rate]
+group_summary[, churn_0.5 := (1-0.5) * avg_churn_rate]
+
+group_summary[, ltv_0.25 := calculate_ltv(avg_revenue, churn_0.25, discount_rate, horizon)]
+group_summary[, ltv_0.5 := calculate_ltv(avg_revenue, churn_0.5, discount_rate, horizon)]
+
+# WTP
+group_summary[, WTP_0.25 :=  ltv_0.25 - avg_ltv]
+group_summary[, WTP_0.5 := ltv_0.5 - avg_ltv]
+
+# Profitability if cost is $100
+group_summary[, Profit_g0.25_c100 := WTP_0.25 - 100]
+group_summary[, Profit_g0.5_c100 := WTP_0.5 - 100]
+
+# Profitability if cost is $175
+group_summary[, Profit_g0.25_c175 := WTP_0.25 - 175]
+group_summary[, Profit_g0.5_c175 := WTP_0.5 - 175]
+
+group_summary <- group_summary[order(-WTP_0.5)]
+
+# View the updated table
+kable(group_summary[, 1:9], digits = 2) %>%
+  kable_styling(font_size = 8) 
+kable(group_summary[, 10:ncol(group_summary)], digits = 2) %>%
+  kable_styling(font_size = 8)
+
+
+```
+
+Analyzing Result :
+
+Value of a proposed churn management program (WTP) Per segment
+
+-   WTP_0.25 is the value of a proposed churn management program that
+    has 0.25 success value.
+
+-   For example, for score group 20, we can spend up to \$105.96373 per
+    customer per 4 year, assuming a 25% success probability (𝛾= 0.25 ).
+
+-   WTP_0.5 is the value of a proposed churn management program that has
+    0.5 success value.
+
+-   For example, for score group 20, we can spend up to \$580.1549 per
+    customer per 4 year, assuming a 50% success probability (𝛾= 0.5 ).
+
+Maximum amount that we would spend to prevent a customer from churning
+for one year.
+
+-   Max WTP per 1 year, is the WTP after applying the program for Y0 -\>
+    Y1. After then the churn will go from 0 -\> 1 (retention). Even if
+    the program makes customer stays as long as 4 years. We'll only
+    consider that we spent \$100 program cost on the first year.
+
+-   So the Max WTP per 1 year is WTP_0.25 and WTP_0.5
+
+\newpage
+
+# Summarize your main results
+
+*Please organize your main results along the four questions posed in the
+overview.*
+
+1.  Is customer churn at Cell2Cell predictable from the customer
+    information that Cell2Cell maintains?
+
+    Yes, customer churn at Cell2Cell is predictable using the customer
+    data provided.
+
+    -   Predictive Performance: The logistic regression model
+        successfully predicts churn with close alignment between the
+        average predicted churn rate (0.0194) and the observed churn
+        rate (0.0193) in the validation sample after adjusting for
+        oversampling.
+
+    -   Lift Analysis: The model demonstrates strong predictive power
+        through lift analysis, where higher score groups exhibit
+        significantly higher churn rates compared to lower groups,
+        confirming the model's ability to rank customers by churn risk.
+        Additionally, when applied the baseline churn rate, It hits
+        close to the mid segment group reflects that the churn
+        'predictions' align with the 'observation' of churn – the
+        reality that is expected per each segment.
+
+<!-- -->
+
+2.  What factors drive customer churn? Which factors are particularly
+    important?
+
+    See also part 6 analysis,
+
+    1.  retcall (0.55341249) : Customers with retention calls are more
+        likely to churn, possibly due to dissatisfaction with previous
+        interactions or unresolved issues. Highly significant
+        (effect_size=0.55341249 , p=1.89e-05)
+
+    2.  creditaa (-0.2891994) : Customers with excellent credit ratings
+        'aa' are less likely to churn, possibly indicating higher
+        satisfaction or loyalty. Highly significant
+        (effect_size=-0.2891994 , p=3.96e-43)
+
+    3.  refurb (0.19258463) : Customers with refurbished devices are
+        more likely to churn, possibly due to dissatisfaction with older
+        hardware. Highly significant (effect_size=0.19258463,
+        p=3.88e-21)
+
+3.  What incentives should Cell2Cell offer to prevent customer churn?
+
+See also part 6 analysis,
+
+-   Personalized Service Recovery: Provide dedicated, high-quality
+    customer service follow-ups for customers who have made a retention
+    call, ensuring their issues are fully resolved. - Offer discounts or
+    credits (e.g., one-time \$50 credit) for the inconvenience.
+
+-   Implement a proactive monitoring system to identify frequent
+    retention team callers and address their issues before they
+    escalate.
+
+-   Provide special discounts or perks (e.g., reduced fees for 3 months)
+    to frequent retention callers to demonstrate appreciation and regain
+    trust.
+
+-   Upgrade Program : Create trade-in programs allowing refurbished
+    users to easily swap for newer models at minimal cost.
+
+-   Offer loyalty programs, such as discounts on premium services or
+    free upgrades, for customers who meet certain payment and credit
+    score thresholds. This will incentivize 'aa' credit customer to stay
+    loyal.
+
+4.  What is the economic value of a proposed targeted plan to prevent
+    churn, and how does this value differ across customer segments?
+    Compare the economic value to an incentive with a cost of \$100 and
+    another incentive with a cost of \$175. Which customers segments
+    should receive the incentive? Does the answer depend on the success
+    probability?
+
+    -   Customer in segment 20 (high churn rate) provides higher benefit
+        from churn management program than customer in segment 1 (low
+        churn rate). This is because if we apply the program to the
+        group that is likely to churn, we can gain the benefit from the
+        customer that continue to stay with us.
+    -   Cost of the incentive is \$100,
+        -   If the program has 0.25 success rate, Cell2Cell will earn
+            profit if apply program to segment 2-19. The segment 1 shown
+            -\$0.4843072, suggesting that the program cost is higher
+            than the value that churn program will give. Hence, it is
+            not worth investing in segment 1.
+        -   If the program has 0.5 success rate, Cell2Cell can earn
+            profit from all segments.
+    -   Cost of the incentive is \$175,
+        -   If the program has 0.25 success rate, Cell2Cell should
+            target only 19-20th segments because they offer profit.
+        -   If the program has 0.5 success rate, Cell2Cell can target
+            all segments.
+    -   To be the most effective, Cell2Cell should target the customer
+        with higher churn rate like 20th segments if the likelihood of
+        program success is low (0.25) and program cost is between
+        \$100-175. However, if the likelihood of program success is high
+        (0.50) it can target any segments given the cost of implementing
+        program is between \$100-175.

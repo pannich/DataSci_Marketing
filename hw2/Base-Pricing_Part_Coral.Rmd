@@ -1,0 +1,698 @@
+---
+title: "Base Pricing Analysis and Price Elasticity Estimation"
+author: "Giovanni Compiani"
+output:
+  pdf_document:
+    number_sections: yes
+    toc: yes
+header-includes: \usepackage{booktabs}
+graphics: yes
+urlcolor: blue
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE, comment = NA, message = FALSE, eval = TRUE,
+                      fig.width = 4.5, fig.height = 3, fig.align = "right")
+```
+
+\setlength{\parskip}{6pt}
+\newpage
+
+# Overview
+
+The goal is to conduct a base pricing analysis. We estimate brand-level demand using scanner data, and then we make profitability predictions corresponding to specific base price changes. We estimate log-linear demand models that use (log) prices and promotions as inputs, and predict log quantities, `log(1+Q)`. The models predict the demand for a focal brand, and we control for (log) prices and promotions of three competitors. Obviously, this approach generalizes to an arbitrarily large number of competing products as long as the sample size is large enough.
+
+Our focus is on the two top brands in the liquid laundry detergent category, *Tide* and *Gain*. Both are Procter & Gamble brands. The two closest competitors are *Arm & Hammer* and *Purex*.
+
+# Packages
+
+Make sure to install two packages that we have not used before: fixest and knitr.
+
+```{r}
+library(bit64)
+library(data.table)
+library(fixest)
+library(knitr)
+library(ggplot2)
+```
+
+\newpage
+
+# Data overview
+
+The data are located in this folder:
+
+```{r}
+
+data_folder = "/Users/nichada/MyCode/MPCS/_BUSN_DataSci/DataSci_Mkt/hw2/data"
+#data_folder = "Data"
+```
+
+\bigskip
+
+The data source is an extract from the Nielsen RMS retail scanner data set. The data set captures weekly price and quantity data for all products (UPC's) sold in the stores of a large number of U.S. retail chains. The Kilts data do not include all retailers (for example, Walmart is not part of the data), and the identity of the retailers is not revealed. However, we know if two stores belong to the same retail chain.
+
+## Brand data
+
+The data.table `brands` in `Brands.RData` includes brand information for the top five brands in three categories (product modules):
+
+```         
+1036   FRUIT JUICE - LEMON/LIME
+1040   FRUIT JUICE - ORANGE - OTHER CONTAINER
+7012   DETERGENTS - HEAVY DUTY - LIQUID
+```
+
+The data include the brand code, brand description, and total revenue calculated across all observations. The top five brands were selected based on total brand revenue.
+
+We will focus on the liquid laundry detergent category with corresponding `product_module_code` 7012.
+
+## Store data
+
+Inspect the table `stores` in the file `Stores.RData`. The variable `store_code_uc` identifies each retail stores. For some (but not all) stores we know the corresponding `retailer_code` that identifies the chain (banner) that the store belongs to. The data include the Scantrack (SMM) market code and the Scantrack market description. Scantrack markets correspond to large metropolitan market areas such as *Chicago* or *Raleigh-Durham* (see the data manual for a map of the Scantrack markets). The three-digit ZIP code of each store is also included.
+
+## Movement data
+
+The movement data (`move`) are in files of the form `brand_move_<module code>.RData`. The data are at the brand/store/week level and include prices and quantities (`units`). The data are aggregates of all UPC's that share the same brand name. Brand prices are measured as the weighted average over all store/week UPC prices in equivalent units, and quantities represent total product volume measured in equivalent units such as ounces. In the liquid laundry detergent category (module 7012), prices represent dollars per ounce and units are total product volume in ounces per store/week. The aggregation weights are based on total store-level UPC revenue across all weeks, and hence the aggregation weights are constant within each store. The movement data also include a promotion indicator (`promo_dummy`), a logical `TRUE/FALSE` variable.
+
+The `week_end` variable date is the last day of a Nielsen week, which always starts on a Sunday and ends on a Saturday. Note that prices may change during the period, and hence even the UPC-level price may be an average over more than one posted price. The sample includes data for the 2010-2013 period.
+
+Please consult the official Kilts Center Retail Scanner Dataset Manual for all details.
+
+\newpage
+
+# Prepare the data for the demand analysis
+
+We first load the brand and store data.
+
+```{r}
+load(paste0(data_folder, "/Brands.RData"))
+load(paste0(data_folder, "/Stores.RData"))
+```
+
+## Select the category and brands
+
+\*Choose the laundry detergent category (module) and select the corresponding brand-level meta data from the data table `brands`. Then sort (order) the brand data corresponding to total brand revenue, and select the **top four brands** (ranked by revenue).
+
+```{r}
+selected_module = 7012                 # Laundry detergent
+laundry_brands = brands[product_module_code == selected_module]
+
+sorted_brands = laundry_brands[order(-laundry_brands$revenue), ]
+
+top_four_brands = head(sorted_brands, 4)
+
+top_four_brands
+```
+
+\medskip
+
+*Let's assign each brand a new name using a new variable, `brand_name`, and give the four brands simple names such as `Tide`, `Gain`, `ArmHammer`, and `Purex`. These simplified brand names will make our code and the estimation output more readable.* More specifically, create a new data containing the four selected brands and add to it the `brand_name` variable.
+
+Note that we will add the brand names to the quantity, price, and promotion variables. In R, `price_ArmHammer` (as well as `price_Arm_Hammer`) are legal variable names, but `price_Arm&Hammer` and `price_Arm & Hammer` are not, and hence I do not suggest the brand names `Arm&Hammer` or `Arm & Hammer`.
+
+```{r}
+top_four_brands$brand_name = NA 
+
+top_four_brands$brand_name[top_four_brands$brand_descr == "TIDE - H-D LIQ"] = "Tide"
+top_four_brands$brand_name[top_four_brands$brand_descr == "GAIN - H-D LIQ"] = "Gain"
+top_four_brands$brand_name[top_four_brands$brand_descr == "ARM & HAMMER - H-D LIQ"] = "ArmHammer"
+top_four_brands$brand_name[top_four_brands$brand_descr == "PUREX - H-D LIQ"] = "Purex"
+
+top_four_brands
+
+```
+
+## Prepare the movement data
+
+\*Load the movement data, and---for better readability---change the variable names from `units` to `quantity` and from `promo_dummy` to `promotion` (you can use the `setnames` command for this). Change the data type of the `promotion` variable from `logical` to `numeric` using the `as.numeric` function. Finally, merge the new `brand_name` variable with the movement table (more precisely, perform an inner join, i.e. retain all observations that are present in both the parent and child data sets).
+
+```{r}
+load(paste0(data_folder, "/brand_move_7012.RData"))
+setnames(move, old = c("units", "promo_dummy"), new = c("quantity", "promotion"))
+move$promotion = as.numeric(move$promotion)
+merged_data = merge(move, top_four_brands[,c("brand_code_uc","brand_name")], by = "brand_code_uc")
+merged_data
+```
+
+## Remove outliers
+
+Most data contain some "flaws" or outliers. Here is an easy way of removing such outliers:
+
+First, we create a function that flags all observations in a vector `x`, for example a price series, as outliers if the ratio between a value and the median value among all `x` observations is below or above a threshold.
+
+```{r}
+isOutlier <- function(x, threshold_bottom, threshold_top) {
+   is_outlier = rep(FALSE, times = length(x))
+   median_x   = median(x, na.rm = TRUE)
+   is_outlier[x/median_x < threshold_bottom | x/median_x > threshold_top] = TRUE
+   return(is_outlier)
+}
+```
+
+*Now run this function on the price data, separately for each brand and store. Then tabulate the number of outliers, and remove the corresponding observations from the data set.*
+
+I recommend to use a lower threshold (`threshold_bottom`) value of 0.35 and an upper threshold (`threshold_top`) of 2.5.
+
+```{r}
+threshold_bottom = 0.35
+threshold_top = 2.5
+
+## not sure if needed:
+## merged_data_means = merged_data[, lapply(.SD, mean), 
+##                                 by = .(brand_code_uc, store_code_uc), 
+##                                 .SDcols = c("price")]
+
+merged_data[,isoutlier:=isOutlier(price,threshold_bottom,threshold_top), by = .(brand_code_uc, store_code_uc)]
+
+# tabulate data
+outlier_counts <- merged_data[isoutlier == TRUE, .(outlier_count = .N), by = .(brand_code_uc, brand_name, store_code_uc)]
+print(outlier_counts)
+```
+
+```{r}
+merged_data_cleaned = merged_data[isoutlier=="FALSE"]
+
+merged_data_cleaned
+```
+
+## Reshape the movement data from long to wide format
+
+To prepare the data for the regression analysis, we need to **reshape the data from long to wide format** using **`dcast`**.
+
+All the details on casting and the reverse operation (melting from wide to long format using `melt`) are explained in the data.table html vignettes:
+
+<https://rdatatable.gitlab.io/data.table/articles/datatable-reshape.html>
+
+Let's be specific about the structure of the data that we need to use to estimate a demand model. We would like to obtain a table with observations, characterized by a combination of store id (`store_code_uc`) and week (`week_end`) in rows, and information on quantities, prices, and promotions in columns. Quantities, prices, and promotions are brand-specific.
+
+```{r}
+
+wide_data = dcast(merged_data_cleaned, 
+                   store_code_uc + week_end ~ brand_name, 
+                   value.var = c("price", "quantity", "promotion"))
+
+
+wide_data
+```
+
+## Merge store information with the movement data
+
+*Now merge the movement data with the store meta data, in particular with the retailer code, the Scantrack (SMM) market code, and the Scantrack market description. But only with the store meta data where we have a valid retailer code. Hence, we need to remove store data if the retailer code is missing (`NA`). Use the `is.na` function to check if `retailer_code` is `NA` or not.*
+
+```{r}
+# Merge movement data with store meta data
+# Keep only stores with a non-NA retailer code
+movement_merged <- merge(wide_data, stores[!is.na(retailer_code)], 
+                           by = "store_code_uc", all.x = TRUE)
+
+# Display the merged data
+head(movement_merged)
+```
+
+## Create time variables or trends
+
+*A time trend records the progress of time. For example, a time trend at the week-level may equal 1 in the first week in the data, 2 in the second week, etc., whereas a trend at the month-level may equal 1 in the first month, 2 in the second month, etc.*
+
+*I suggest you create a monthly time trend. Use the functions `year` and `month` to extract the year and month components of the week (`week_end`) variable in the movement data (alternatively, you could use the `week` function if you wanted to create a time trend at the week-level). Then, use the following code to create the monthly trend:*
+
+```{r}
+# Ensure the week_end is in Date format if it isn't already
+movement_merged[, week_end := as.Date(week_end)]
+
+# Extract year and month from week_end
+movement_merged[, year := year(week_end)]
+movement_merged[, month := month(week_end)]
+
+movement_merged[, month_trend := 12*(year - min(year)) + month]
+```
+
+## Remove missing values
+
+Finally, *retain only complete cases*, i.e. rows without missing values:
+
+```{r}
+
+# Remove rows with any missing values
+movement_merged <- movement_merged[complete.cases(movement_merged)]
+
+# Display the cleaned data
+colSums(is.na(movement_merged))
+
+```
+
+\newpage
+
+# Data inspection
+
+## Observations and geographic coverage
+
+*First, document the number of observations and the number of unique stores in the data.*
+```{r}
+#Document the number of observations and unique stores
+num_observations <- nrow(movement_merged)
+num_unique_stores <- uniqueN(movement_merged$store_code_uc)
+
+cat("Number of observations:", num_observations, "\n")
+cat("Number of unique stores:", num_unique_stores, "\n")
+
+
+
+```
+
+*Second, we assesss if the included stores have broad geographic coverage. We hence create a summary table that records the number of observations for each separate Scantrack market:*
+
+```{r}
+# Create a summary table for each Scantrack market (SMM_description)
+market_coverage <- movement_merged[, .(n_obs = .N), by = SMM_description]
+
+```
+
+Note the use of the data.table internal `.N`: `.N` is the number of observations, either in the whole data table, or---as in this case---the number of observations within each group defined by the `by =` statement.
+
+\medskip
+
+A convenient way to print a table is provided by the **`kable`** function that is included in the `knitr` package. Please consult the documentation for `kable` to see all options. Particularly useful are the options `col.names`, which is used below, and `digits`, which allows you to set the number of digits to the right of the decimal point.
+
+*Now use `kable` to document the number of observations within each Scantrack market.*
+
+```{r}
+# Use kable to print the summary table
+kable(market_coverage, col.names = c("Scantrack Market", "No. Observations"))
+```
+## Price variation
+
+Before estimating the demand models we would like to understand the degree of price variation in the data. Comment on why this is important for a regression analysis such as demand estimation!
+
+- Price variation is needed to accurately estimate how demand responds to changes in price. Without sufficient variation, price elasticity cannot be reliably determined. 
+- Variation helps prevent multicollinearity and allows the model to isolate the effect of price changes on demand. 
+- It ensures the model captures actual market behavior and pricing trends, making the results more generalizable.
+
+We will predict demand for Tide and Gain. For each of these two brands separately, we would like to visualize the overall degree of price variation across observations, and also the variation in relative prices with respect to the competing brands.
+
+-   *To visualize the (own) price variation, normalize the prices of Tide and Gain by dividing by the average of these prices, and show the histogram of normalized prices.*
+```{r}
+# Normalize prices for Tide and Gain
+movement_merged[, price_Tide_normalized := price_Tide / mean(price_Tide, na.rm = TRUE)]
+movement_merged[, price_Gain_normalized := price_Gain / mean(price_Gain, na.rm = TRUE)]
+
+# Plot histograms for normalized prices
+ggplot(movement_merged, aes(x = price_Tide_normalized)) +
+  geom_histogram(binwidth = 0.05, fill = "blue", alpha = 0.7) +
+  labs(title = "Histogram of Normalized Tide Prices", x = "Normalized Price (Tide)", y = "Count") +
+  scale_x_continuous(limits = c(0.5, 1.5))  # Set limits to avoid extreme outliers
+
+ggplot(movement_merged, aes(x = price_Gain_normalized)) +
+  geom_histogram(binwidth = 0.05, fill = "red", alpha = 0.7) +
+  labs(title = "Histogram of Normalized Gain Prices", x = "Normalized Price (Gain)", y = "Count") +
+  scale_x_continuous(limits = c(0.5, 1.5))  # Set limits to avoid extreme outliers
+
+```
+
+-   *To visualize relative prices, calculate the ratio of Tide and Gain prices with respect to the three competing brands, and show the histogram of relative prices.*
+```{r}
+# Calculate relative prices for Tide and Gain compared to the competing brands (e.g., ArmHammer, Purex)
+movement_merged[, relative_price_Tide_ArmHammer := price_Tide / price_ArmHammer]
+movement_merged[, relative_price_Tide_Purex := price_Tide / price_Purex]
+movement_merged[, relative_price_Gain_ArmHammer := price_Gain / price_ArmHammer]
+movement_merged[, relative_price_Gain_Purex := price_Gain / price_Purex]
+
+# Plot histograms for relative prices
+ggplot(movement_merged, aes(x = relative_price_Tide_ArmHammer)) +
+  geom_histogram(binwidth = 0.05, fill = "blue", alpha = 0.7) +
+  labs(title = "Histogram of Relative Price (Tide/ArmHammer)", x = "Relative Price (Tide/ArmHammer)", y = "Count") +
+  scale_x_continuous(limits = c(0.5, 2))  # Set limits to avoid extreme outliers
+
+ggplot(movement_merged, aes(x = relative_price_Tide_Purex)) +
+  geom_histogram(binwidth = 0.05, fill = "green", alpha = 0.7) +
+  labs(title = "Histogram of Relative Price (Tide/Purex)", x = "Relative Price (Tide/Purex)", y = "Count") +
+  scale_x_continuous(limits = c(0.5, 2))  # Set limits to avoid extreme outliers
+
+ggplot(movement_merged, aes(x = relative_price_Gain_ArmHammer)) +
+  geom_histogram(binwidth = 0.05, fill = "red", alpha = 0.7) +
+  labs(title = "Histogram of Relative Price (Gain/ArmHammer)", x = "Relative Price (Gain/ArmHammer)", y = "Count") +
+  scale_x_continuous(limits = c(0.5, 2))  # Set limits to avoid extreme outliers
+
+ggplot(movement_merged, aes(x = relative_price_Gain_Purex)) +
+  geom_histogram(binwidth = 0.05, fill = "purple", alpha = 0.7) +
+  labs(title = "Histogram of Relative Price (Gain/Purex)", x = "Relative Price (Gain/Purex)", y = "Count") +
+  scale_x_continuous(limits = c(0.5, 2))  # Set limits to avoid extreme outliers
+
+```
+
+Note: To avoid that the scale of a graph is distorted by a few outliers, use the `limits` option in `scale_x_continuous` (see the ggplot2 introduction). This also helps to make the graphs comparable with each other.
+
+## Summary of data inspection
+
+*Discuss the data description, including sample size, geographic coverage, and the results on own and relative price variation.*
+
+1. Sample Size and Unique Stores
+The dataset includes 1,259,352 observations and covers 6,421 unique stores. The large sample size and number of unique stores ensure a comprehensive dataset that captures diverse pricing and demand patterns across numerous retail locations. This extensive coverage enhances the robustness of our analysis.
+
+2. Geographic Coverage
+The dataset encompasses a broad range of Scantrack markets, indicating good geographic representation. The number of observations per market varies, covering major regions like Denver, Northern California, and West Texas, among others. This wide coverage enables us to study regional differences in consumer behavior, competitive strategies, and pricing variations.
+
+3. Own Price Variation
+The histograms of normalized prices for Tide and Gain reveal meaningful price variation around their respective means. The histogram for Tide indicates a concentrated price range between approximately 0.75 and 1.25, with the majority of prices clustered around the mean. This distribution suggests consistent pricing with occasional adjustments, likely due to regional factors or promotions.
+
+Similarly, the histogram for Gain shows a comparable spread of prices, but with some observable peaks, indicating periods of price adjustments or strategic promotions. These variations in own prices are essential for the demand analysis as they provide the basis for estimating the sensitivity of demand to price changes.
+
+4. Relative Price Variation
+The histograms of relative prices between Tide and its competitors, Arm & Hammer and Purex, illustrate a spread of price ratios centered around 1.0. This indicates that Tide’s prices are generally comparable to its competitors but occasionally deviate, suggesting pricing strategies that reflect competitive positioning.
+
+The histograms of relative prices for Gain with respect to Arm & Hammer and Purex display similar patterns, with price ratios centered around 1.0. However, there are more pronounced peaks in the distributions, implying more aggressive pricing or promotions for Gain compared to its competitors. This relative price variation is 
+
+\newpage
+
+# Estimation
+
+Now we are ready to estimate demand models for Tide and Gain.
+
+We want to estimate a sequence of models with an increasing number of controls and compare the stability of the key results across these models. In all models the output is `log(1+quantity_<brand name>)`.
+
+\bigskip
+
+To keep things simple, we will initially estimate demand for Tide only.
+
+Let's start with the following models:
+
+1.  log of own price as only input
+2.  Add store fixed effects
+3.  Add a time trend---maybe linear, or a polynomial with higher-order terms
+4.  Instead of a time trend add fixed effects for each month (more precisely: for each year/month combination)
+
+*Estimate the models using the `feols` function from the fixest package (consult the corresponding fixest guide included among the R learning resources on Canvas). Store the regression outputs in some appropriately named variables (objects).*
+
+\bigskip
+
+**Hint**: Recall that it is perfectly legitimate in R to write model formulas such as
+
+```
+log(1+quantity_<brand name>) ~ log(price_<brand name>)
+```
+Hence, there is no need to create new variables such as the logarithm of own price, etc., before estimating a demand model.
+``` {r}        
+# Model 1: Log of Tide's price as the only input
+fit_base <- feols(log(1 + quantity_Tide) ~ log(price_Tide), data = movement_merged)
+
+# Model 2: Add store fixed effects
+fit_store_FE <- feols(log(1 + quantity_Tide) ~ log(price_Tide) | store_code_uc, data = movement_merged)
+
+# Model 3: Add a time trend
+fit_trend <- feols(log(1 + quantity_Tide) ~ log(price_Tide) + month_trend | store_code_uc, data = movement_merged)
+
+# Model 4: Add year/month fixed effects
+fit_month_FE <- feols(log(1 + quantity_Tide) ~ log(price_Tide) | store_code_uc + month, data = movement_merged)
+
+```
+
+
+
+\bigskip
+
+You can display the regression coefficients using the `summary` function. As a much more elegant solution, however, I recommend using the `etable` function in the `fixest` package, which produces nicely formatted output.
+
+Please **consult the fixest guide on how to use `etable`**, and **go through the** ***Checklist for creating LaTeX tables using `etable`***!
+
+Here is an example (note that the `fit` objects are the regression outputs---adjust the names if necessary):
+
+```{r, results = "asis"}
+etable(fit_base, fit_store_FE, fit_trend, fit_month_FE,
+       tex = TRUE,
+       fitstat = c("n", "r2"), signif.code = NA,
+       cluster = c("store_code_uc", "month_trend"))
+```
+
+Note the option `cluster = c("store_code_uc", "month_trend")`, which tells `etable` to show standard errors that are clustered at the store and month level. These clustered standard errors will be larger and more accurate than regular standard errors because they reflect that the error terms in the regression are likely correlated at the store and month level.
+
+\bigskip
+
+Before moving on, you may want to remove the regression output objects that are no longer used, because they take up much space in memory:
+
+```{r}
+rm(fit_base, fit_store_FE, fit_trend)
+```
+
+## Controlling for competitor prices
+
+*Now add the competitor prices to the demand model.*
+
+```{r}
+fit_comp <- feols(log(1 + quantity_Tide) ~ log(price_Tide) + log(price_Gain) + log(price_Purex) +  log(price_ArmHammer) | store_code_uc + month, data = movement_merged)
+```
+
+## Controlling for promotions
+
+*Now add the promotions dummies, first just for Tide, then for all brands. Compare the results. Did controlling for promotions change the own price elasticity estimate in an expected manner?*
+
+```{r, results = "asis"}
+# Add promotion for tide
+fit_promo_comp_tide <-  feols(log(1 + quantity_Tide) ~ log(price_Tide) + log(price_Gain) + log(price_ArmHammer) + log(price_Purex) + promotion_Tide  | store_code_uc + month, data = movement_merged)
+
+# Add promotion for all brands
+fit_promo_comp <-  feols(log(1 + quantity_Tide) ~ log(price_Tide) + log(price_Gain) + log(price_ArmHammer) + log(price_Purex) + promotion_Tide + promotion_Gain + promotion_ArmHammer + promotion_Purex | store_code_uc + month, data = movement_merged)
+
+etable(fit_month_FE, fit_comp, fit_promo_comp_tide, fit_promo_comp,
+       tex = TRUE,
+       fitstat = c("n", "r2"), signif.code = NA,
+       cluster = c("store_code_uc", "month_trend"))
+```
+
+\bigskip
+
+*Summarize and comment on the estimation results. Was it necessary to control for store fixed effects, time trends/fixed effects, as well as competitor prices and promotions? What do we learn from the magnitudes of the own and cross-price elasticities?*
+
+\bigskip
+
+We will use the final model including all variables (I called it `fit_promo_comp`) as our preferred model. To make this final model distinguishable from the regression output for Gain we rename it:
+
+```{r}
+fit_Tide = fit_promo_comp
+```
+
+1. Did controlling for promotions change the own price elasticity estimate in an expected manner?
+Yes, controlling for promotions did change the own price elasticity in an expected manner. Without promotions (Model 1 of the second table), the elasticity of Tide's price is -7.465. After controlling for promotions (Model 4 of the first table), the price elasticity becomes less negative (-4.030), which is expected since promotions tend to increase demand, making the price effect less dramatic when controlling for promotional influences.
+
+2. Summarize and comment on the estimation results.
+The estimation results show that the own-price elasticity of Tide is negative across models, indicating price sensitivity. The inclusion of promotions reduces the elasticity, as the promotion increases demand directly. Cross-price elasticities with competitors show that Gain is a significant substitute (elasticity around 0.68), while Purex has little competitive effect (negative but small), and Arm & Hammer also acts as a substitute with a small positive effect (around 0.14). Promotions for Tide significantly increase demand (about 0.38), while competitor promotions have mixed effects.
+
+3. Was it necessary to control for store fixed effects, time trends/fixed effects, as well as competitor prices and promotions?
+Yes, controlling for these factors was necessary to improve the accuracy of the estimates. Store fixed effects account for unique store-specific characteristics that could influence demand, while time trends and fixed effects control for temporal variations such as seasonality. Controlling for competitor prices and promotions is also critical to isolate the true effect of Tide’s price and promotion on its quantity sold, ensuring that external competitive factors do not confound the results.
+
+4. What do we learn from the magnitudes of the own and cross-price elasticities?
+The own-price elasticity of Tide (-4.03 in the final model) suggests that Tide is quite price-sensitive, with a 1% increase in price leading to about a 4% decrease in demand. The cross-price elasticity with Gain (around 0.68) shows a strong substitutive relationship, meaning that Gain and Tide are significant competitors. Purex has a weak competitive effect, and Arm & Hammer has a small positive substitutive effect. These elasticities highlight the importance of pricing and promotions in driving demand for Tide in a competitive market.
+
+\newpage
+
+## Demand model for Gain
+
+*Now repeat the steps to estimate demand for Gain.*
+
+*Briefly comment on the estimates, as you did before with Tide.*
+
+
+```{r,  results = "asis"}
+# Model 1: Log of Tide's price as the only input
+fit_base <- feols(log(1 + quantity_Gain) ~ log(price_Gain), data = movement_merged)
+
+# Model 2: Add store fixed effects
+fit_store_FE <- feols(log(1 + quantity_Gain) ~ log(price_Gain) | store_code_uc, data = movement_merged)
+
+# Model 3: Add a time trend
+fit_trend <- feols(log(1 + quantity_Gain) ~ log(price_Gain) + month_trend | store_code_uc, data = movement_merged)
+
+# Model 4: Add year/month fixed effects
+fit_month_FE_gain <- feols(log(1 + quantity_Gain) ~ log(price_Gain) | store_code_uc + month, data = movement_merged)
+
+etable(fit_base, fit_store_FE, fit_trend, fit_month_FE_gain,
+       tex = TRUE,
+       fitstat = c("n", "r2"), signif.code = NA,
+       cluster = c("store_code_uc", "month_trend"))
+
+rm(fit_base, fit_store_FE, fit_trend)
+
+
+### Controlling for competitor prices
+fit_comp_gain <- feols(log(1 + quantity_Gain) ~ log(price_Gain) + log(price_Tide) + log(price_Purex) +  log(price_ArmHammer) | store_code_uc + month, data = movement_merged)
+
+## Controlling for promotions
+# Add only promotion dummy for gain
+fit_promo_comp_gain <- feols(log(1 + quantity_Gain) ~ log(price_Gain) + log(price_Tide) + log(price_Purex) +  log(price_ArmHammer) + promotion_Gain | store_code_uc + month, data = movement_merged)
+
+# Add all promotion dummies
+fit_promo_comp <-  feols(log(1 + quantity_Gain) ~ log(price_Gain) + log(price_Tide) + log(price_ArmHammer) + log(price_Purex) + promotion_Gain + promotion_Tide + promotion_ArmHammer + promotion_Purex | store_code_uc + month, data = movement_merged)
+
+fit_Gain = fit_promo_comp
+
+etable(fit_month_FE_gain, fit_comp_gain, fit_promo_comp_gain, fit_promo_comp,
+       tex = TRUE,
+       fitstat = c("n", "r2"), signif.code = NA,
+       cluster = c("store_code_uc", "month_trend"))
+
+```
+
+1. Did controlling for promotions change the own price elasticity estimate in an expected manner?
+Yes, controlling for promotions changed the own price elasticity estimate for Gain in an expected manner. Without controlling for promotions (Model 1 of the second table), the own price elasticity of Gain is -9.967, indicating strong price sensitivity. When promotions are controlled for (Model 4 of the first table), the elasticity becomes less negative (-5.016), as expected, since promotions increase demand and thus reduce the overall sensitivity to price changes.
+
+2. Summarize and comment on the estimation results.
+The results show that the own-price elasticity of Gain is significantly negative across models, indicating that demand for Gain is highly price-sensitive. When controlling for promotions, the elasticity decreases, meaning that promotions reduce the effect of price on demand. Competitor prices, particularly Tide's price, have a positive impact on Gain’s demand (elasticity around 1.6), suggesting that Tide is a significant substitute. Promotions for Gain itself have a large positive effect (0.69), while competitor promotions show varied effects, with Purex promotions slightly increasing Gain demand.
+
+3. Was it necessary to control for store fixed effects, time trends/fixed effects, as well as competitor prices and promotions?
+Yes, controlling for store fixed effects, time trends, and competitor prices and promotions was necessary. Store fixed effects account for store-specific characteristics, while time trends control for seasonal or time-based variations. Including competitor prices and promotions helps isolate the true effect of Gain’s price on its quantity demanded by controlling for external competitive factors that could confound the relationship between Gain's price and demand.
+
+4. What do we learn from the magnitudes of the own and cross-price elasticities?
+Gain’s own-price elasticity (-5.016 in the final model) shows that demand for Gain is highly price-sensitive, with a 1% increase in price leading to a 5% decrease in demand. The positive cross-price elasticity with Tide (around 1.6) suggests that Gain and Tide are strong substitutes, while the effects of Purex and Arm & Hammer prices on Gain demand are smaller. Promotion elasticities show that Gain promotions have a large effect on increasing demand, while competitor promotions have mixed but smaller effects on Gain's sales.
+
+
+\newpage
+
+# Profitability analysis
+
+The goal is to fine-tune prices jointly for Tide and Gain. We hence use the estimates of the preferred demand models and evaluate the product-line profits when we change the prices of the two brands.
+
+\bigskip
+
+To predict profits, let's only retain data for one year, 2013:
+
+```{r}
+move_predict = movement_merged[year == 2013]
+```
+
+\bigskip
+
+Although we have excellent demand data, we do not know the production costs of the brands (this is confidential information). We can infer the cost making an informed assumption on retail margins and the gross margin of the brand.
+
+```{r}
+gross_margin  = 0.35
+retail_margin = 0.18
+
+cost_Tide = (1-gross_margin)*(1-retail_margin)*mean(move_predict$price_Tide)
+cost_Gain = (1-gross_margin)*(1-retail_margin)*mean(move_predict$price_Gain)
+```
+
+As prices are measured in dollars per ounce, these marginal costs are also per ounce.
+
+\bigskip
+
+Now create a vector indicating the percentage price changes that we consider within an acceptable range, up to +/- 5%.
+
+```{r}
+percentage_delta = seq(-0.05, 0.05, 0.025)    # Identical to = c(-0.5, -0.025, 0.0, 0.025, 0.05)
+
+```
+
+\bigskip
+
+We will consider all possible combinations of price changes for Tide and Gain. This can be easily achieved by creating a data table with the possible combinations in rows (please look at the documentation for the `rep` function):
+
+```{r}
+L = length(percentage_delta)
+profit_DT = data.table(delta_Tide = rep(percentage_delta, each = L),
+                       delta_Gain = rep(percentage_delta, times = L),
+                       profit     = rep(0, times = L*L))
+```
+
+Inspect the resulting table. The `profit` column will allow us to store the predicted profits.
+```{r}
+# Create a combined year-month variable
+movement_merged[, year_month := paste0(year, "-", month)]
+
+# Check the column names to verify the creation of year_month
+names(movement_merged)
+# Filter the dataset for the year 2013
+move_predict <- movement_merged[year == 2013]
+
+# Ensure that year_month exists in move_predict
+move_predict[, year_month := paste0(year, "-", month)]
+# Check if year_month exists in move_predict
+names(move_predict)
+
+# Define the final model for Tide with competitor prices and promotions
+fit_Tide <- feols(
+  log(1 + quantity_Tide) ~ log(price_Tide) + promotion_Tide + promotion_Gain + promotion_Purex + promotion_ArmHammer + 
+  log(price_Gain) + log(price_Purex) + log(price_ArmHammer) | store_code_uc + year_month,
+  data = movement_merged
+)
+
+# Define the final model for Gain with competitor prices and promotions
+fit_Gain <- feols(
+  log(1 + quantity_Gain) ~ log(price_Gain) + promotion_Gain + promotion_Tide + promotion_Purex + promotion_ArmHammer + 
+  log(price_Tide) + log(price_Purex) + log(price_ArmHammer) | store_code_uc + year_month,
+  data = movement_merged
+)
+
+
+```
+
+\bigskip
+
+Now we are ready to iterate over each row in `profit_DT` and evaluate the total product-line profits of Tide and Gain for the corresponding percentage price changes. You can perform this iteration with a simple for-loop:
+
+```{r, eval = FALSE}
+# Store the original prices of Tide and Gain
+original_price_Tide <- move_predict$price_Tide
+original_price_Gain <- move_predict$price_Gain
+
+# Iterate over each row in profit_DT to calculate profits for each combination of price changes
+for (i in 1:nrow(profit_DT)) {
+  
+  # Calculate the new prices based on percentage changes from profit_DT
+  move_predict$price_Tide <- original_price_Tide * (1 + profit_DT$delta_Tide[i])
+  move_predict$price_Gain <- original_price_Gain * (1 + profit_DT$delta_Gain[i])
+  
+  # Predict demand using the demand models with the updated prices
+  predicted_demand_Tide <- predict(fit_Tide, newdata = move_predict)
+  predicted_demand_Gain <- predict(fit_Gain, newdata = move_predict)
+  
+  # Calculate total profit for Tide and Gain at the new prices
+  profit_Tide <- sum((move_predict$price_Tide - cost_Tide) * predicted_demand_Tide, na.rm = TRUE)
+  profit_Gain <- sum((move_predict$price_Gain - cost_Gain) * predicted_demand_Gain, na.rm = TRUE)
+  
+  # Store the total profit in profit_DT
+  profit_DT$profit[i] <- profit_Tide + profit_Gain
+}
+
+profit_DT
+
+```
+
+\medskip
+
+Some hints:
+
+-   Before you start the loop, store the original price levels of Tide and Gain.
+-   Update the price columns in `move_predict` and then predict demand.
+-   Calculate total profits at the new price levels for both brands and then store the total profit from Tide and Gain in `profit_DT`.
+
+\medskip
+
+Show a table of profits in levels and in ratios relative to the baseline profit at current price levels, in order to assess the percent profit differences resulting from the contemplated price changes.
+```{r}
+# Calculate baseline profit
+baseline_demand_Tide <- predict(fit_Tide, newdata = move_predict)
+baseline_demand_Gain <- predict(fit_Gain, newdata = move_predict)
+
+baseline_profit_Tide <- sum((original_price_Tide - cost_Tide) * baseline_demand_Tide, na.rm = TRUE)
+baseline_profit_Gain <- sum((original_price_Gain - cost_Gain) * baseline_demand_Gain, na.rm = TRUE)
+baseline_profit <- baseline_profit_Tide + baseline_profit_Gain
+# Calculate profit ratios relative to baseline profit
+profit_DT[, profit_ratio := profit / baseline_profit]
+# Load the necessary library
+library(knitr)
+
+# Display the table with profit levels and ratios
+kable(profit_DT, col.names = c("Delta Tide", "Delta Gain", "Profit Level", "Profit Ratio"), digits = 2, format = "html")
+
+```
+
+
+\bigskip
+
+*Discuss the profitability predictions and how prices should be changed, if at all. How do you reconcile the recommended price changes with the own-price elasticity estimates?*
+1. Key Observations:
+- The profit ratios increase as the percentage price changes for both Tide and Gain move towards positive values. This suggests that increasing prices for both brands generally leads to higher profitability.
+- The maximum profit ratio observed in the table is 1.08, which occurs when both Tide and Gain prices are increased by 5%. This indicates that a 5% increase in both prices yields an 8% increase in total product-line profits relative to the baseline.
+- There is a noticeable symmetry in the results, indicating that similar price increases for Tide and Gain yield similar increases in profitability. This implies that the price sensitivity for both brands is somewhat aligned.
+
+2. Recommendations for Price Changes
+- The results show that increasing prices for both brands within this range leads to the highest profits. This strategy leverages the observed profit ratios without introducing drastic changes. The recommendation to increase prices aligns with the assumption that the own-price elasticities for Tide and Gain are relatively inelastic. Inelastic demand implies that increasing prices will not significantly decrease the quantity demanded, resulting in higher revenues and profits.
+- The combinations with negative price changes lead to profit ratios below 1. This suggests that decreasing prices for Tide or Gain results in lower overall profits, indicating that the current pricing strategy does not benefit from aggressive price reductions. The results indicate that there are minimal negative cross-price elasticity effects. If cross-price elasticities were significant, increasing prices for both brands would lead to a substantial reduction in demand for one brand due to the substitution effect. The absence of such an effect suggests that the brands have somewhat differentiated positions, allowing for simultaneous price increases.
