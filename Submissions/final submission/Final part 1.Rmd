@@ -1,0 +1,531 @@
+---
+title: "Final Assignment: Incrementality and Optimal Personalized Targeting"
+author: "Nichada Wongrassamee"
+output:
+  pdf_document:
+    number_sections: yes
+    toc: yes
+urlcolor: blue
+graphics: yes
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE, comment = NA, message = FALSE, 
+                      fig.width = 4.5, fig.height = 3.25, fig.align = "right")
+knitr::opts_chunk$set(tidy.opts = list(width.cutoff = 60), tidy = TRUE)
+```
+
+\setlength{\parskip}{6pt}
+\newpage
+
+I pledge my honor that I have not violated the Honor Code during this examination.
+
+Nichada Wongrassamee December 11, 2024
+
+(My typed name is an acknowledgment that my work did not violate the Booth School Honor Code)
+
+\newpage
+
+# Final assignment instructions
+
+\bigskip
+
+**The final assignment is an individual assignment. Any discussion of the material with your classmates or any other person constitutes a violation of the Booth honor code.**
+
+\bigskip
+
+**Very important**: Please do not start to work on the assignment one day before the due date. Give it some time, and work on the different parts systematically, step by step. Breaking the overall task into small pieces and writing clean code will make the analysis much easier.
+
+\bigskip
+
+## Group peer evaluations
+
+**Typically, there are no problems to report, and you can skip this section**.
+
+\medskip
+
+However, if there were issues in your group, in particular if one or multiple group members did not contribute to the group work, you can report this by adding a cover sheet or appendix to your final assignment submission.
+
+In particular, provide an **effort rating**. The effort rating ranges from 0–100%. For example, a 90% rating implies that the group member will get 90% of the group grade (for all assignments). The average rating across all members is taken as the final effort rating for a group member. If no effort rating is turned in, a default rating of 100% will be used.
+
+Also, please **explain the reason for a rating below 100%** in a few words.
+
+## Submission instructions
+
+The final assignment will be due on **Wednesday, December 11, 2024, by 11:59 p.m.**
+
+\medskip
+
+**Your submission will not be graded and you will get a score of zero if you don't submit the "Data and Class Materials Usage Restrictions" form by the deadline**.
+
+### Submitting the final {.unnumbered}
+
+-   Submission on Canvas
+
+-   Please ensure that you submit a single document in pdf format.
+
+-   Indicate your name, section that you are enrolled in, and your student ID on the cover page.
+
+-   The cover page needs to include the Booth School Honor Code, your typed name (or alternatively a scanned signature), and an acknowledgment that your typed name indicates that you did not violate the Honor Code. Example:
+
+    *I pledge my honor that I have not violated the Honor Code during this examination.*
+
+    *John Doe*
+
+    *December 11, 2024*
+
+    *(My typed name is an acknowledgment that my work did not violate the Booth School Honor Code)*
+
+\smallskip
+
+-   Your finals will be graded within about 7 days.
+
+-   All requests for re-grading need to be submitted in writing with a detailed explanation of why you would like me to re-consider your exam within two weeks of receipt of your exam. Regrading might results in an increase or decrease in the final grade.
+
+-   The material covered in class gives you the tools you need to complete this assignment. However, if you have clarification questions, please do not send an email but rather post a Canvas thread so that all students can benefit from the exchange.
+
+# Managing a computationally intensive data-analysis
+
+Some of the analysis will take a nontrivial amount of time. To be efficient, save the results from the computationally intensive steps, such as the model `fit` objects or the predicted outputs, to a file.
+
+Also, when you conduct a long, extensive analysis, it is useful to spread the code across multiple scripts or R Markdown files. For example, you may want to create three R Markdown files corresponding to the three steps in the analysis outlined below.
+
+\newpage
+
+# Overview
+
+As in the previous assignment, we use customer-level data from the data base of a company that sells kitchenware, housewares, and specialty food products. We again use the October 2017 sample that contains records on 250,000 customers, and in addition we use a sample from a similar catalog mailing in October 2018 that contains 125,000 records. Please refer to the last assignment for more details on the variables in the data set.
+
+Both data sets have a very important property: The catalog-mailing in the October 2017 and 2018 data was fully **randomized**---the treatment, `mailing_indicator`, was randomly assigned to the customers. This will allow us to estimate the causal effect of catalog mailing for every customer in the sample.
+
+The goal of the analysis is to create a **fully personalized** targeting policy based on the **incremental effect** of targeting, as opposed to the *level* of profits (which may have been achieved even without any targeting efforts).
+
+\bigskip
+
+Detailed hints on how to conduct the analysis are provided below.
+
+# Summary of findings
+
+In your write-up, first **summarize your key findings** and the main insights that you gained from the analysis. Please be concise and provide a summary that does not exceed one page. The more detailed analysis supporting your findings should follow this summary and should be organized in the four main steps described next.
+
+\vskip 0.4in
+
+# Step 1: Estimation and prediction of conditional average treatment effects
+
+First, we load the relevant packages.
+
+```{r}
+library(bit64)
+library(data.table)
+library(glmnet)
+library(ggplot2)
+library(knitr)
+library(corrplot)
+library(dplyr)
+```
+
+We use the 2017 data to estimate and validate several models to predict the incremental effects.
+
+```{r}
+data_folder = "Data"
+
+load(paste0(data_folder, "/Customer-Development-2017-2.RData"))
+```
+
+Split the sample into a 50 percent training and 50 percent validation sample. Please make sure to **use the same seed** as in the code chunk below for comparability.
+
+```{r}
+set.seed(2001)
+crm_DT[, training_sample := rbinom(nrow(crm_DT), 1, 0.5)]
+```
+
+To make the code more readable, I recommend renaming the `mailing_indicator` to make it clear that the randomized mailing is the treatment, $W_i$.
+
+```{r}
+setnames(crm_DT, "mailing_indicator", "W")
+```
+
+## Data pre-processing
+
+As in the previous assignment, remove highly correlated features from the data set.
+
+```{r}
+# Remove highly correlated feature from dataset
+
+# inspect data
+dim(crm_DT)
+
+cor_matrix = cor(crm_DT[, !c("customer_id", "W", "outcome_spend"), 
+                        with = FALSE])
+
+```
+
+Now use `corrplot` to create a pdf file that visualizes the correlation among all variables in two separate graphs.
+
+```{r}
+pdf("Correlation-Matrix.pdf", height = 16, width = 16)
+corrplot(cor_matrix, method = "color",
+         type = "lower", diag = FALSE,
+         tl.cex = 0.4, tl.col = "gray10")
+
+corrplot(cor_matrix, method = "number", number.cex = 0.25, addgrid.col = NA,
+         type = "lower", diag = FALSE,
+         tl.cex = 0.4, tl.col = "gray10")
+dev.off()
+```
+
+Create a data table that contains the correlations for all variable pairs:
+
+```{r}
+# The correlations on the diagonal are 1.0 and the correlations in the upper triangle 
+# are identical to the correlations in the lower triangle. 
+# Hence, we do not need to summarize these correlations.
+cor_matrix[upper.tri(cor_matrix, diag = TRUE)] = NA
+
+# Converts the lower triangular part of the correlation matrix into a long-format data table, 
+# where each row represents a correlation between two variables.
+cor_DT = data.table(row = rep(rownames(cor_matrix), ncol(cor_matrix)),
+                    col = rep(colnames(cor_matrix), each = ncol(cor_matrix)),
+                    cor = as.vector(cor_matrix))
+cor_DT = cor_DT[is.na(cor) == FALSE]
+```
+
+Now find all correlations larger than 0.95 in absolute value.
+
+```{r}
+# Eliminate the redundant variables in the `row` column
+large_cor_DT = cor_DT[abs(cor) > 0.95]
+kable(large_cor_DT, digits = 4)
+```
+
+```{r}
+# save for use in step2
+# save(large_cor_DT, file = "large_cor_DT.RData")
+```
+
+```{r}
+# Remove the large_cor_DT$row from crm_DT
+crm_DT = crm_DT[, !large_cor_DT$row, with = FALSE]
+```
+
+## Randomization checks
+
+Inspect the data to estimate the probability of a mailing (also called propensity score), $$p = \Pr\{W_i=1\}.$$
+
+Perform a quick check to assess if the treatment (catalog mailing) was indeed randomized in the whole data base and hence does not depend on the customer attributes, $\boldsymbol{x}_i$.
+
+### Method 1 : propensity model
+
+If all p-values for covariates in the summary are insignificant and the overall model fit is poor (low predictive power), it suggests randomization holds.
+
+```{r}
+library(tableone)
+
+# Logistic regression to estimate propensity score
+propensity_model <- glm(W ~ ., data = crm_DT, family = binomial)
+summary(propensity_model)
+```
+
+-   There are some variables that are statistically significant such as orders_d_1yr, spend_period_1b, etc.
+
+### Method 2 : SMD check
+
+Check statistically by comparing SMD value. If SMD value \< 0.1, it is considered good balance, it suggests randomization holds.
+
+```{r}
+# Method 2 : check by covariate
+
+# Check balance using standardized mean differences
+library(tableone)
+table_one <- CreateTableOne(vars = setdiff(names(crm_DT), "W"), strata = "W", data = crm_DT)
+
+# SMD < 0.1 is considered evidence of good balance, regardless of statistical significance (p-value).
+
+# Extract the SMD values
+smd_matrix <- ExtractSmd(table_one)
+
+# Convert to data frame
+smd_df <- as.data.frame(smd_matrix)
+smd_df$Covariate <- rownames(smd_df)
+rownames(smd_df) <- NULL
+
+# Filter for SMD > 0.1
+imbalanced_covariates <- smd_df[smd_df$`1` > 0.1, ]  # Adjust column name if needed
+print(imbalanced_covariates)
+```
+
+-   There is no variable that has SMD \> 0.1
+
+### Method 3 : Density plot
+
+Density plot of the propensity scores from treatment (targeted) and control (non targeted) overlapped completely, indicating randomization.
+
+```{r}
+# Predict propensity_score
+crm_propensity <- copy(crm_DT)
+crm_propensity[, propensity_score := predict(propensity_model, type = "response")]
+
+# Show head
+# crm_propensity[, .(propensity_score)][1:6]
+```
+
+```{r}
+# Method 3 : Visualize propensity score
+ggplot(crm_propensity, aes(x = propensity_score, fill = factor(W))) +
+  geom_density(alpha = 0.5) +
+  labs(title = "Distribution of Propensity Scores", x = "Propensity Score", fill = "Treatment") +
+  theme_minimal()
+```
+
+-   Hence, it can be conclude from the propensity score and distribution that customer attributes are independent from the W. This indicates that the data is randomize.
+
+## Estimation of incremental effect of targeting (CATE)
+
+We use the training sample to estimate the CATE (conditional average treatment effect) on dollar spending, $\tau_i$, due to catalog targeting:
+
+$$\tau_{i}=\mathbb{E}[Y_{i}(1)-Y_{i}(0)|\boldsymbol{x}_{i}].$$
+
+In particular, we estimate the CATE using the *"two-in-one" regression* approach discussed in class and we consider the following models:
+
+(a) OLS
+(b) LASSO
+(c) Elastic Net
+
+\bigskip
+
+You can include **interactions between variables in an R model formula** using either the syntax `x*z` or `x:z`. When you use `x*z`, R will include `x`, `z`, and the interaction (`x` multiplied with `z`) in the regression. Using `x:z`, only the interaction is included. Similarly, using `.*z`, all variables in the data set and all interactions of the variables with `z` will be included, while `.:z` only adds the interaction terms with `z`.
+
+```         
+x*z : Include x,z (covariantes) and x $\cdot$ z (interaction)
+x:z : Include x $\cdot$ z
+.*z : Includes all variables and their interactions with z
+."z : Includes only interaction terms with z
+```
+
+## Estimation: Hints
+
+To simplify your code I recommend **creating separate training and validation samples** from the full data set. Also, exclude the variables that are not used in the statistical analysis:
+
+```{r}
+training_DT   = crm_DT[training_sample == 1,
+                       !c("customer_id", "training_sample"), with = FALSE]
+validation_DT = crm_DT[training_sample == 0,
+                       !c("customer_id", "training_sample"), with = FALSE]
+
+dim(training_DT) # 148 features including W , outcome_spend
+```
+
+### Two-in-One Regression
+
+$$ Y_i = \beta_0 + \beta_1W + \beta_2x_i + \beta_3(W \cdot x_i) + \epsilon_i $$ - $\beta_0 + \beta_2x_i$ : expected outcome of W=0 - $\beta_1 + \beta_3x_i$ : treat ment effect $\tau_i$ CATE
+
+The "two-in-one" regression combines the estimation of both the treatment and control outcomes into a single model. It estimates the Conditional Average Treatment Effect (CATE) directly by including an interaction term between treatment W and the covariates xi. Output treatment effects (CATE) is in coefficients associate with :
+
+W (main treatment effect, $\beta_1$) Interaction Terms (W:x1, W:x2, ...) capture how treatment effects vary with covariates $\beta_3$
+
+Unlike the conditional expectation in previous exercise that we have to fit models and compute the difference treatment effect manually E[Y1\|x] - E[Y0\|x].
+
+```{r}
+# Find CATE (T_i) with Two-in-One Regression
+
+# Fit an OLS model, using all covariates xi to estimate Ti : 
+fit_ols <- lm(outcome_spend ~ W * ., 
+                data = training_DT)
+
+# View results
+summary_OLS = summary(fit_ols)
+
+# save to result for comparison 
+results = data.table(input = rownames(summary_OLS$coefficients),
+                     est_OLS = summary_OLS$coefficients[, 1], 
+                     p_OLS = summary_OLS$coefficients[, 4])
+```
+
+\bigskip
+
+For replicability and comparability, **provide `cv.glmnet` with the folds used for cross-validation**. Set the seed below and then draw numbers indicating the fold ($1,2,\dots,10$) that an observation belongs to:
+
+```{r}
+set.seed(961)
+
+N_obs_training = nrow(training_DT)
+folds = sample(1:10, N_obs_training, replace = TRUE)
+```
+
+You can now use these fold id's in `glmnet` as follows:
+
+```{r, eval = FALSE}
+# fit_glmnet = cv.glmnet(..., foldid = folds)
+```
+
+### Lasso Regression
+
+```{r}
+# LASSO Regression
+
+# Prepare data for glmnet (model.matrix creates interaction terms automatically)
+X_train <- model.matrix(outcome_spend ~ W * ., data = training_DT)[, -1]
+y_train <- training_DT$outcome_spend
+
+# Fit a LASSO model (alpha = 1 for LASSO)
+fit_LASSO <- cv.glmnet(x = X_train, y = y_train, alpha = 1.0, foldid = folds)
+
+bestlambda_coef = coef(fit_LASSO, s = "lambda.min")[,1]
+length(bestlambda_coef) #294
+```
+
+```{r}
+# Add est_LASSO to result table 
+# s= "lambda.min". Feature selection from the LASSO model at the 
+# optimal regularization parameter, determined by cross-validation 
+# behind the scene
+# [,1] convert coef() to matrix
+
+results[, est_LASSO := bestlambda_coef]
+
+# Plot cross-validation results
+plot(fit_LASSO)
+```
+
+**Selecting best lambda model**
+
+X-Axis : Log($\lambda$) - smaller lambda : less regularization - higher lambda : strong regularization. Model has selected less features and is more simple.
+
+Y-Axis (MSE) - lower MSE indicates better performing model
+
+Left Dashed Vertical Line - left dashed line : lambda min. The most accurate model has around 80 variable - right dashed line : optimize the speed of the model while compromise the accuracy
+
+### Elastic Net
+
+```{r}
+
+# Output table
+alpha_seq = seq(0, 1, by = 0.05)
+L = length(alpha_seq)
+rmse_DT = data.table(alpha = alpha_seq, mean_cv_error = rep(0, L))
+
+# Calculate cross-validation error for different alpha values
+for (i in 1:L) {
+  cv_i = cv.glmnet(x = X_train, 
+                   y = y_train, 
+                   alpha = rmse_DT[i, alpha],
+                   foldid = folds) 
+  rmse_DT[i, mean_cv_error := min(cv_i$cvm)]
+  cat("Iteration", i, "cv_error:", min(cv_i$cvm), "\n") 
+}
+
+# Optimal alpha:
+index_min = which.min(rmse_DT$mean_cv_error) 
+opt_alpha = rmse_DT[index_min, alpha]
+
+cat("Optimal alpha:", opt_alpha, "\n")
+```
+
+```{r}
+fit_elnet <- cv.glmnet(x = X_train, y = y_train, alpha = opt_alpha, foldid = folds)
+results[, est_elnet := coef(fit_elnet, s = "lambda.min")[,1]]
+```
+
+### Estimation results
+
+```{r}
+kable(results, digits = 4)
+```
+
+Number of selected coefficient in different models :
+
+```{r}
+sum(abs(results$est_OLS) > 0)
+
+sum(abs(results$est_LASSO) > 0)
+
+sum(abs(results$est_elnet) > 0)
+```
+
+-   LASSO and elastic net only select a relatively small fraction of all features, 75 and 86 features. Hence, a significant amount of regularization is used.
+
+\bigskip
+
+Once you have estimated the models, save all the output objects in a file for later use.
+
+```{r}
+# Save the fitted model to a file
+# save(fit_ols, fit_LASSO, fit_elnet, results, file = "models.RData")
+```
+
+## Predict treatment effects
+
+To validate the models you need to predict the CATE. You will make your life much easier if you first create a new data.table,
+
+```{r}
+predict_DT = crm_DT[training_sample == 0,
+                    c("customer_id", "outcome_spend", "W"), with = FALSE]
+```
+
+Add the model predictions to this table.
+
+\bigskip
+
+**Hint: CATE prediction**
+
+The predicted CATE is based on the difference between predicted spending conditional on $W_i=1$ and $W_i=0$. For example, using the OLS estimates, you would first predict:
+
+```{r, eval=FALSE}
+# Y_1 = predict(fit_OLS, newdata = validation_DT[, W := 1])
+# Y_0 = predict(fit_OLS, newdata = validation_DT[, W := 0])
+```
+
+Then take the difference between `Y_1` and `Y_0` to predict the CATE, $\tau_i$.
+
+You will use a similar approach for the LASSO, where you will have to appropriately create the matrix of inputs (independent variables) depending on the value of `W`.
+
+\medskip
+
+**Warning**: Remember that `validation_DT[, W := 1]` *permanently* changes all values in the `W` column of the table `validation_DT`. This is OK unless you plan to later use the changed `validation_DT` table for other purposes that require the actual values of `W`.
+
+Hence, to be completely on the safe side, you can predict $Y$ conditional on $W$ using a copy of the table:
+
+```{r}
+temp_DT = copy(validation_DT)
+
+# Predict using OLS
+Y_1_OLS = predict(fit_ols, newdata = temp_DT[, W := 1])
+Y_0_OLS = predict(fit_ols, newdata = temp_DT[, W := 0])
+predict_DT[, CATE_OLS := Y_1_OLS - Y_0_OLS]
+
+# Predict using LASSO
+
+# -> Assume target everyone
+temp_DT[, W := 1]  # Set W = 1 for all data rows
+Y_1_LASSO <- predict(
+  fit_LASSO, 
+  newx = model.matrix(outcome_spend ~ W * ., data = temp_DT)[,-1], s = "lambda.min")
+
+# -> Assume target no one
+temp_DT[, W := 0]  # Set W = 0 for all data rows 
+Y_0_LASSO <- predict(
+  fit_LASSO, 
+  newx = model.matrix(outcome_spend ~ W * ., data = temp_DT)[,-1], s = "lambda.min")
+predict_DT[, CATE_LASSO := Y_1_LASSO - Y_0_LASSO]
+
+# Predict using Elastic Net
+temp_DT[, W := 1] 
+Y_1_EN <- predict(
+  fit_elnet, 
+  newx = model.matrix(outcome_spend ~ W * ., data = temp_DT)[,-1], s = "lambda.min")
+
+temp_DT[, W := 0]  # Set W = 0 for prediction
+Y_0_EN <- predict(
+  fit_elnet, 
+  newx = model.matrix(outcome_spend ~ W * ., data = temp_DT)[,-1], s = "lambda.min")
+predict_DT[, CATE_EN := Y_1_EN - Y_0_EN]
+```
+
+```{r}
+# Save CATE predictions
+fwrite(predict_DT, "CATE_predict_DT.csv")
+```
+
+\bigskip
+
+Once all model predictions are added, save the table to a file for use in step 2.
